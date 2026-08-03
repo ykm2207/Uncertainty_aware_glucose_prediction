@@ -69,78 +69,76 @@ def evaluate_model_evidential(model, loader, sigma_g, mu_g, ecp_graph_save_path)
         "MAE": mae(all_targets_real, all_preds_real),
     }
 
-    # ===== 원래 쓰던 지표(원 논문 기준) 계산 — 이번 실험은 RMSE/MAE만 쓰기로 해서 주석처리 =====
-    # 지우지 않고 남겨둔 이유: 나중에 다시 비교하고 싶을 때 주석만 풀면 바로 쓸 수 있게.
-    # metrics_dict["MARD"] = np.mean(np.abs(all_preds_real - all_targets_real) / all_targets_real) * 100
-    #
-    # arr = DTS_error_zone_count(all_targets_real, all_preds_real)
-    # counts = np.bincount(arr, minlength=5)
-    # percentages = 100 * counts / counts.sum()
-    # for i, zone in enumerate("ABCDE"):
-    #     metrics_dict[f"Zone {zone} accuracy"] = percentages[i]
-    #
-    # if np.std(t_std) > 0 and np.std(arr) > 0:
-    #     arr_rho, _ = spearmanr(t_std, arr)
-    #     metrics_dict["Correlation with risk zones"] = arr_rho
-    # else:
-    #     metrics_dict["Correlation with risk zones"] = float("nan")
-    #
-    # Llower = all_preds_real + CI_calculation(0.68, all_alpha_real, all_beta_real, all_nu_real, all_preds_real)
-    # Lupper = all_preds_real - CI_calculation(0.68, all_alpha_real, all_beta_real, all_nu_real, all_preds_real)
-    #
-    # target_level_70_hypo = (all_targets_real < 70).astype(int)
-    # target_level_180_hyper = (all_targets_real > 180).astype(int)
-    #
-    # if target_level_70_hypo.sum() > 0:
-    #     pred_level_70_hypo = (Llower < 70).astype(int)
-    #     metrics_dict["Level 70 Sensitivity"] = sensitivity_metric(target_level_70_hypo, pred_level_70_hypo)
-    #     metrics_dict["Brier_Hypo"] = f_brier_hypo_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
-    #     metrics_dict["AUC_Hypo"] = f_auc_hypo_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
-    # else:
-    #     print("  [참고] 테스트셋에 저혈당(<70) 샘플이 없어 Hypo 관련 지표는 '정의 불가'로 표시")
-    #     metrics_dict["Level 70 Sensitivity"] = float("nan")
-    #     metrics_dict["Brier_Hypo"] = float("nan")
-    #     metrics_dict["AUC_Hypo"] = float("nan")
-    #
-    # if target_level_180_hyper.sum() > 0:
-    #     pred_level_180_hyper = (Lupper > 180).astype(int)
-    #     metrics_dict["Level 180 Sensitivity"] = sensitivity_metric(target_level_180_hyper, pred_level_180_hyper)
-    #     metrics_dict["Brier_Hyper"] = f_brier_hyper_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
-    #     metrics_dict["AUC_Hyper"] = f_auc_hyper_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
-    # else:
-    #     print("  [참고] 테스트셋에 고혈당(>180) 샘플이 없어 Hyper 관련 지표는 '정의 불가'로 표시")
-    #     metrics_dict["Level 180 Sensitivity"] = float("nan")
-    #     metrics_dict["Brier_Hyper"] = float("nan")
-    #     metrics_dict["AUC_Hyper"] = float("nan")
-    #
-    # pred_std = t_std
-    # pred_error = np.abs(all_preds_real - all_targets_real)
-    # rho_uncertainty, _ = spearmanr(pred_std.flatten(), pred_error.flatten())
-    # metrics_dict["Correlation with error"] = rho_uncertainty
-    #
-    # ecp_list, dis_list = [], []
-    # for j in range(99):
-    #     interval_CI = (j + 1) * 0.01
-    #     neg_CI_delta = student_t.interval(interval_CI, 2 * all_alpha_real, loc=0, scale=pred_std)[1]
-    #     acc = np.sum(np.abs(all_targets_real - all_preds_real) < np.abs(neg_CI_delta))
-    #     empirical_ecp = acc / len(all_targets_real)
-    #     discrepancy = np.abs(empirical_ecp - interval_CI)
-    #     ecp_list.append(empirical_ecp)
-    #     dis_list.append(discrepancy)
-    # ecp_list.append(1.0)
-    # metrics_dict["MCE"] = np.mean(dis_list)
-    #
-    # plt.figure(figsize=(5, 4))
-    # plt.plot(np.arange(0.01, 1.01, 0.01), ecp_list, label=f'ECP (MCE = {metrics_dict["MCE"]:.2e})')
-    # plt.plot([0, 1], [0, 1], "r--", label="Nominal Coverage")
-    # plt.xlabel("Nominal coverage prob.")
-    # plt.ylabel("Empirical coverage prob.")
-    # plt.legend(fontsize=9)
-    # plt.title("Error Calibration Plot (Shanghai T2DM)", fontsize=10)
-    # plt.tight_layout()
-    # plt.savefig(ecp_graph_save_path, dpi=300, bbox_inches="tight")
-    # plt.close()
-    # ===== 여기까지 주석처리 =====
+    # ===== 원래 쓰던 지표(원 논문 기준) 계산 — 다시 활성화함 =====
+    metrics_dict["MARD"] = np.mean(np.abs(all_preds_real - all_targets_real) / all_targets_real) * 100
+
+    arr = DTS_error_zone_count(all_targets_real, all_preds_real)
+    counts = np.bincount(arr, minlength=5)
+    percentages = 100 * counts / counts.sum()
+    for i, zone in enumerate("ABCDE"):
+        metrics_dict[f"Zone {zone} accuracy"] = percentages[i]
+
+    if np.std(t_std) > 0 and np.std(arr) > 0:
+        arr_rho, _ = spearmanr(t_std, arr)
+        metrics_dict["Correlation with risk zones"] = arr_rho
+    else:
+        metrics_dict["Correlation with risk zones"] = float("nan")
+
+    Llower = all_preds_real + CI_calculation(0.68, all_alpha_real, all_beta_real, all_nu_real, all_preds_real)
+    Lupper = all_preds_real - CI_calculation(0.68, all_alpha_real, all_beta_real, all_nu_real, all_preds_real)
+
+    target_level_70_hypo = (all_targets_real < 70).astype(int)
+    target_level_180_hyper = (all_targets_real > 180).astype(int)
+
+    if target_level_70_hypo.sum() > 0:
+        pred_level_70_hypo = (Llower < 70).astype(int)
+        metrics_dict["Level 70 Sensitivity"] = sensitivity_metric(target_level_70_hypo, pred_level_70_hypo)
+        metrics_dict["Brier_Hypo"] = f_brier_hypo_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
+        metrics_dict["AUC_Hypo"] = f_auc_hypo_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
+    else:
+        print("  [참고] 테스트셋에 저혈당(<70) 샘플이 없어 Hypo 관련 지표는 '정의 불가'로 표시")
+        metrics_dict["Level 70 Sensitivity"] = float("nan")
+        metrics_dict["Brier_Hypo"] = float("nan")
+        metrics_dict["AUC_Hypo"] = float("nan")
+
+    if target_level_180_hyper.sum() > 0:
+        pred_level_180_hyper = (Lupper > 180).astype(int)
+        metrics_dict["Level 180 Sensitivity"] = sensitivity_metric(target_level_180_hyper, pred_level_180_hyper)
+        metrics_dict["Brier_Hyper"] = f_brier_hyper_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
+        metrics_dict["AUC_Hyper"] = f_auc_hyper_score(all_preds_real, all_beta_real, all_nu_real, all_alpha_real, all_targets_real)
+    else:
+        print("  [참고] 테스트셋에 고혈당(>180) 샘플이 없어 Hyper 관련 지표는 '정의 불가'로 표시")
+        metrics_dict["Level 180 Sensitivity"] = float("nan")
+        metrics_dict["Brier_Hyper"] = float("nan")
+        metrics_dict["AUC_Hyper"] = float("nan")
+
+    pred_std = t_std
+    pred_error = np.abs(all_preds_real - all_targets_real)
+    rho_uncertainty, _ = spearmanr(pred_std.flatten(), pred_error.flatten())
+    metrics_dict["Correlation with error"] = rho_uncertainty
+
+    ecp_list, dis_list = [], []
+    for j in range(99):
+        interval_CI = (j + 1) * 0.01
+        neg_CI_delta = student_t.interval(interval_CI, 2 * all_alpha_real, loc=0, scale=pred_std)[1]
+        acc = np.sum(np.abs(all_targets_real - all_preds_real) < np.abs(neg_CI_delta))
+        empirical_ecp = acc / len(all_targets_real)
+        discrepancy = np.abs(empirical_ecp - interval_CI)
+        ecp_list.append(empirical_ecp)
+        dis_list.append(discrepancy)
+    ecp_list.append(1.0)
+    metrics_dict["MCE"] = np.mean(dis_list)
+
+    plt.figure(figsize=(5, 4))
+    plt.plot(np.arange(0.01, 1.01, 0.01), ecp_list, label=f'ECP (MCE = {metrics_dict["MCE"]:.2e})')
+    plt.plot([0, 1], [0, 1], "r--", label="Nominal Coverage")
+    plt.xlabel("Nominal coverage prob.")
+    plt.ylabel("Empirical coverage prob.")
+    plt.legend(fontsize=9)
+    plt.title("Error Calibration Plot (Shanghai T2DM)", fontsize=10)
+    plt.tight_layout()
+    plt.savefig(ecp_graph_save_path, dpi=300, bbox_inches="tight")
+    plt.close()
 
     return metrics_dict
 
@@ -188,10 +186,9 @@ def main():
         "RMSE/MAE는 예측값과 실제값의 평균적인 크기 오차만 반영하는 지표입니다.\n"
         "원 논문(HUPA, T1D 기준)이 핵심으로 삼은 MARD/DTS 존 정확도/Brier/AUC/ECP(MCE)는\n"
         "저혈당·고혈당 위험구간 탐지 성능과 불확실성 보정 품질까지 봅니다.\n"
-        "이번 실험은 RMSE/MAE만 쓰기로 해서 그 지표들은 현재 계산에서 주석처리해뒀습니다\n"
-        "(evaluate_model_evidential 함수 내부, 필요하면 주석만 풀면 다시 계산됨).\n"
-        "또한 이 실험은 원 논문과 달리 T2DM 데이터를 사용했으므로, 나중에 다시 켤 때는\n"
-        "T1D 기준으로 설계된 원 논문 결과와 다르게 나올 수 있다는 점도 감안해야 합니다."
+        "또한 이 실험은 원 논문과 달리 T2DM 데이터를 사용했으므로, 위 지표(특히 MCE와\n"
+        "Correlation with error)가 T1D 기준으로 설계된 원 논문 결과와 다르게 나올 수 있다는 점을\n"
+        "감안해서 해석해야 합니다."
     )
 
 
