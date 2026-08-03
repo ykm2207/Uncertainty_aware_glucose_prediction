@@ -1,0 +1,113 @@
+# configs_cgmacros.py
+# CGMacros 데이터셋용 실험 설정 파일
+#
+# 왜 configs.py(HUPA용)와 분리했는가:
+#   HUPA-UCM(5분 간격), CGMacros(1분 간격), Shanghai(15분 간격)는 샘플링 주기와
+#   보유 피처가 전혀 다르다. 하나의 config로 억지로 묶으면 조건 분기가 늘어나서
+#   실수하기 쉬우므로, 데이터셋별로 완전히 분리된 설정 파일을 둔다.
+#   (data.py / model.py / utils.py의 순수 유틸/모델 함수는 그대로 재사용한다.)
+
+# =========================
+# 데이터 경로 및 대상 환자
+# =========================
+DATA_DIR = "./data/CGMacros"
+
+# prepare_data_revision.py로 만든, 긴 결측 구간을 미리 잘라낸 복사본 경로.
+# train_cgmacros_revision.py / evaluate_cgmacros_revision.py가 이 경로를 사용한다.
+# (원본 DATA_DIR 파이프라인은 그대로 두고 비교할 수 있도록 별도 상수로 분리)
+DATA_DIR_REVISION = "./data_revision/CGMacros"
+
+# HUPA처럼 환자 ID를 하드코딩하지 않고 data_cgmacros.discover_patients()가
+# 폴더를 스캔해서 자동으로 찾는다. PATIENT_LIMIT을 정수로 주면 앞에서부터
+# 그 수만큼만 사용 -> 맥북에서 빠르게 파이프라인 동작만 확인할 때 사용.
+# (예: PATIENT_LIMIT = 3 으로 두면 3명 데이터로만 스모크 테스트)
+PATIENT_LIMIT = None
+
+# =========================
+# 사용할 피처 정의
+# =========================
+# 실험 조건: Dexcom GL은 미사용(Libre GL만 사용), 인슐린 관련 컬럼은
+# CGMacros 원본에 아예 없으므로 자동으로 제외됨.
+# COLUMN_MAP은 data_cgmacros.load_single_patient_cgmacros()가 만드는
+# numpy 배열의 컬럼 순서(0=glucose, 1=heart_rate, 2=calories)와 반드시 일치해야 한다.
+FEATURES = ["glucose", "heart_rate", "calories"]
+
+COLUMN_MAP = {
+    "glucose": 0,     # Libre GL
+    "heart_rate": 1,  # HR
+    "calories": 2,    # Calories (Activity) -- CGMacros-007은 원본에 이 컬럼이 없어 NaN으로 채워짐
+}
+
+# 원본 CGMacros CSV 컬럼명 -> 우리가 쓰는 내부 피처 이름 매핑
+# (raw CSV 컬럼명이 그대로 FEATURES 순서가 아니므로 로더에서 이 매핑을 사용)
+RAW_COLUMN_NAMES = {
+    "glucose": "Libre GL",
+    "heart_rate": "HR",
+    "calories": "Calories (Activity)",
+}
+
+# =========================
+# 시간 해상도 / 윈도우 설정
+# =========================
+# CGMacros는 1분 간격 그리드 (원 논문 HUPA는 5분 간격이었음 -> 그대로 갖다 쓰면 안 됨)
+SAMPLE_INTERVAL_MIN = 1
+
+# 실험 조건에서 지정된 입력 타임스텝 수 (36스텝 x 1분 = 36분 입력창).
+# 참고: 원 논문은 5분 x 36스텝 = 180분(3시간) 입력이었으므로, 이 설정은
+# 논문 대비 입력 시간창이 1/5 수준으로 짧다 -> 결과 해석 시 감안 필요 (README/보고 시 명시).
+INPUT_TIMESTEPS = 36
+
+# 예측 시점(horizon)을 "분" 단위로 지정하고, 실제 스텝 수는 샘플링 간격으로
+# 자동 환산한다. 이렇게 하면 데이터셋마다 샘플링 간격이 달라도 "30분 뒤 예측"이라는
+# 의미가 코드 전역에서 일관되게 유지된다 (하드코딩된 스텝 수를 쓰면 헷갈리기 쉬움).
+HORIZON_MINUTES = 30  # 60으로 바꾸면 60분 뒤 예측 실험이 됨
+HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
+
+# =========================
+# 결측치(HR/Calories) 처리 정책
+# =========================
+# 실험 조건 메모: "HR/칼로리 결측구간을 절단하고도 쓸 수 있는지" 확인이 필요한 상태.
+# 이 값 이하로 짧게 끊긴 결측은 선형보간으로 메우고, 이 값을 넘는(=오래 기기를
+# 빼놓은 것으로 추정되는) 결측 구간은 그 지점에서 시계열을 아예 끊어
+# 별도의 연속 구간(segment)으로 분리한다. 서로 무관한 시간대를 이어붙여
+# 하나의 윈도우로 만드는 것을 막기 위함. data_cgmacros.report_missingness()로
+# 환자별 결측 패턴을 먼저 확인하고 이 값을 조정할 것.
+MAX_GAP_FOR_INTERP_MIN = 15
+
+# =========================
+# 학습 설정 (실험 조건 지정값)
+# =========================
+BATCH_SIZE = 1024
+NUM_EPOCHS = 300
+LEARNING_RATE = 1e-4
+LAMBDA_REG = 0.01
+REG_TERM = "kl"
+
+# "mps" | "cuda" | "cpu" 중 우선 시도할 backend. 본 학습은 서버(CUDA)에서 돌리기로
+# 해서 기본값을 cuda로 둔다. 맥북에서 파이프라인만 빠르게 스모크 테스트할 땐
+# 이 값을 "mps"로 바꿔서 실행하면 됨. utils.get_device(preferred)는 지정한 backend를
+# 최우선으로 쓰되, 그게 이 기기에서 안 되면 mps -> cuda -> cpu 순으로 자동 폴백한다
+# (예: 이 값을 cuda로 둔 채 맥북에서 실수로 돌려도 mps로 알아서 넘어감).
+DEVICE = "cuda"
+
+# =========================
+# 모델 설정 (TEM, model.py의 e_Transformers 그대로 재사용)
+# =========================
+D_MODEL = 64
+N_HEADS = 4
+NUM_LAYERS = 2
+FF_DIM = 128
+MAX_LEN = 100
+
+# =========================
+# 결과 저장 경로 (원본 HUPA 파이프라인의 산출물과 겹치지 않도록 파일명 분리)
+# =========================
+MODEL_SAVE_PATH = "./cgmacros_tem_model.pth"
+LOSS_SAVE_PATH = "./cgmacros_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH = "./cgmacros_ecp_graph_plot.png"
+
+# data_revision(절단 복사본) 학습 결과물 경로 -- 원본(raw) 파이프라인 결과와
+# 섞이지 않도록 파일명을 다르게 둔다. train_cgmacros_revision.py/evaluate_cgmacros_revision.py 전용.
+MODEL_SAVE_PATH_REVISION = "./cgmacros_revision_tem_model.pth"
+LOSS_SAVE_PATH_REVISION = "./cgmacros_revision_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH_REVISION = "./cgmacros_revision_ecp_graph_plot.png"

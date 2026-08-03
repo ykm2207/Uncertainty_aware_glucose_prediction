@@ -4,6 +4,87 @@ from sklearn.metrics import average_precision_score
 from scipy.stats import t as student_t
 
 
+def rmse(y_true, y_pred):
+    """
+    RMSE(Root Mean Squared Error, 평균제곱근오차)를 계산한다.
+
+    왜 필요한가:
+        원 논문(HUPA-UCM 기준)은 MARD/DTS 존 정확도/Brier/AUC/ECP처럼
+        저혈당·고혈당 위험구간과 불확실성 보정(calibration)까지 함께 보는
+        임상 지표 위주였다. 하지만 CGMacros/Shanghai 재현 실험에서는 팀 지정에 따라
+        "점 예측이 실제 혈당값에서 얼마나 벗어났는가"만 보는 RMSE/MAE를 1차 지표로 쓰기로 했다.
+        RMSE는 큰 오차(스파이크 예측 실패 등)에 제곱으로 페널티를 줘서 MAE보다 민감하다.
+
+    Args:
+        y_true, y_pred : 정규화를 해제한(mg/dL 단위) 실제값/예측값 배열. shape은 동일해야 함.
+
+    Returns:
+        float: RMSE 값 (mg/dL 단위)
+    """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+
+def mae(y_true, y_pred):
+    """
+    MAE(Mean Absolute Error, 평균절대오차)를 계산한다.
+
+    왜 필요한가:
+        RMSE와 함께 보는 이유는, RMSE는 큰 오차(이상치)에 민감하게 반응하는 반면
+        MAE는 오차 크기에 비례해서만 반응하므로 "평균적으로 몇 mg/dL 틀리는가"를
+        더 직관적으로 보여준다. 두 지표를 같이 보고하면 예측 오차 분포에
+        큰 이상치가 섞여 있는지(RMSE≫MAE)까지 함께 판단할 수 있다.
+
+    Args:
+        y_true, y_pred : 정규화를 해제한(mg/dL 단위) 실제값/예측값 배열. shape은 동일해야 함.
+
+    Returns:
+        float: MAE 값 (mg/dL 단위)
+    """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    return float(np.mean(np.abs(y_true - y_pred)))
+
+
+def get_device(preferred="mps"):
+    """
+    학습/평가에 사용할 torch device를 결정한다.
+
+    왜 필요한가:
+        기존 코드(train.py/evaluate.py)는 "cuda 있으면 cuda, 아니면 cpu"만 판단해서
+        Apple Silicon(M1/M2 등) 맥북에서는 GPU 가속(MPS 백엔드)을 전혀 못 썼다.
+        이번 실험은 맥북에서 먼저 파이프라인이 도는지 MPS로 확인하고,
+        추후 랩 서버(CUDA)에서 본 학습을 돌릴 계획이므로 두 백엔드를 모두 지원하되
+        기본 우선순위를 config에서 바꿀 수 있게 만들었다.
+
+    Args:
+        preferred: "mps" | "cuda" | "cpu" 중 우선적으로 시도할 백엔드.
+                   해당 백엔드를 이 기기에서 못 쓰면 mps -> cuda -> cpu 순으로 자동 폴백한다.
+
+    Returns:
+        torch.device: 실제로 사용할 device. 선택된 device는 콘솔에 한글로 출력한다.
+    """
+    candidates = {
+        "mps": lambda: torch.backends.mps.is_available(),
+        "cuda": lambda: torch.cuda.is_available(),
+        "cpu": lambda: True,
+    }
+
+    # 사용자가 지정한 backend를 맨 앞으로, 나머지는 mps -> cuda -> cpu 순으로 폴백 순서를 구성
+    order = [preferred] + [b for b in ("mps", "cuda", "cpu") if b != preferred]
+
+    for backend in order:
+        if candidates[backend]():
+            device = torch.device(backend)
+            print(f"[device] '{backend}' 사용 (요청: '{preferred}')")
+            return device
+
+    # 이론상 cpu는 항상 True이므로 여기까지 오지 않지만, 방어적으로 폴백
+    print("[device] 사용 가능한 backend를 찾지 못해 cpu로 폴백")
+    return torch.device("cpu")
+
+
 def kl_reg_loss_term(u_obs, gamma, alpha, beta):
     """
     Regularization function of Evidential Regression by H.S.Tan et al.

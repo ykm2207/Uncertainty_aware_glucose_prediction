@@ -1,0 +1,8 @@
+# 원본 CGMacros / Shanghai 데이터셋 (수백 MB급 raw 데이터, git 이력에 올리지 않음)
+/data/
+
+# prepare_data_revision.py로 재생성 가능한 파생 데이터 (결측 절단 복사본)
+/data_revision/
+
+__pycache__/
+*.pyc

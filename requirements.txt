@@ -4,3 +4,5 @@ scikit-learn
 matplotlib
 pandas
 torch
+openpyxl
+xlrd>=2.0.1
