@@ -1,28 +1,28 @@
-# train_cgmacros_revision.py
-# prepare_data_revision.py로 만든 "결측 절단 복사본"(./data_revision/CGMacros)으로
-# TEM을 학습하는 스크립트.
-#
-# train_cgmacros.py와 거의 동일하지만 두 가지가 다르다:
-#   1) 데이터 소스가 DATA_DIR(원본, 결측 있음)이 아니라 DATA_DIR_REVISION(절단본)
-#   2) 그래서 prepare_dataset_cgmacros/compute_means_variances_cgmacros가 아니라
-#      data_cgmacros.py의 *_revision 버전을 쓴다 (Timestamp 간격으로 절단 지점을
-#      다시 찾는 방식 - data_cgmacros.py 모듈 하단 설명 참고).
-# 모델 저장 경로도 원본 파이프라인 결과와 섞이지 않도록 별도 파일명(MODEL_SAVE_PATH_REVISION)을 쓴다.
+# train_shanghai.py
+# Shanghai_T2DM 데이터셋으로 TEM(evidential Transformer)을 학습하는 스크립트.
+# 구조는 train_cgmacros.py와 동일하다 (train_evidential_model 학습 루프를 그대로 복제해서
+# 사용하는 이유는 train_cgmacros.py 상단 주석 참고 - train.py를 직접 import하면 안 됨).
+import os
+import sys
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 
+# shanghai/ 폴더에서도 루트의 공용 data.py/model.py/utils.py를 그대로 쓰기 위해
+# 루트 디렉터리를 sys.path에 추가 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data import normalize_features, BGDataset
-from data_cgmacros import prepare_dataset_cgmacros_revision, compute_means_variances_cgmacros_revision
+from data_shanghai import prepare_dataset_shanghai, compute_means_variances_shanghai
 from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, get_device
 from model import e_Transformers
-from configs_cgmacros import (
-    DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, PATIENT_LIMIT,
+from configs_shanghai import (
+    DATA_DIR, FEATURES, COLUMN_MAP,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, MIN_SESSION_ROWS, SESSION_LIMIT,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH_REVISION, LOSS_SAVE_PATH_REVISION,
+    MODEL_SAVE_PATH, LOSS_SAVE_PATH,
 )
 
 
@@ -122,14 +122,14 @@ def make_loader(X, Y, batch_size, shuffle=False):
 
 
 def main():
-    print("=== CGMacros 절단 복사본(data_revision) 데이터 로딩 ===")
-    data_splits = prepare_dataset_cgmacros_revision(
-        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+    print("=== Shanghai_T2DM 데이터 로딩 ===")
+    data_splits = prepare_dataset_shanghai(
+        DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
     )
-    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
-        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_shanghai(
+        DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
     )
 
     data_norm = {}
@@ -151,7 +151,7 @@ def main():
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     )
 
-    print("=== 학습 시작 (절단본) ===")
+    print("=== 학습 시작 ===")
     train_evidential_model(
         model,
         train_loader=train_val_loader,
@@ -162,10 +162,10 @@ def main():
         lambda_reg=LAMBDA_REG,
         reg_term=REG_TERM,
         scheduler_lambda=lambda e: 1.0 if e < NUM_EPOCHS * 0.75 else 0.1,
-        loss_save_path=LOSS_SAVE_PATH_REVISION,
-        model_save_path=MODEL_SAVE_PATH_REVISION,
+        loss_save_path=LOSS_SAVE_PATH,
+        model_save_path=MODEL_SAVE_PATH,
     )
-    print(f"모델 저장 완료: {MODEL_SAVE_PATH_REVISION}")
+    print(f"모델 저장 완료: {MODEL_SAVE_PATH}")
 
 
 if __name__ == "__main__":

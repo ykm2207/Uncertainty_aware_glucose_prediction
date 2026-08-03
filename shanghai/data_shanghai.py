@@ -8,9 +8,14 @@
 # 분리했다. 반면 make_windows/split_data/extract_features 같은 순수 계산 함수는
 # data.py에서 그대로 재사용한다(중복 구현 방지).
 import os
+import sys
 import glob
 import numpy as np
 import pandas as pd
+
+# shanghai/ 폴더에서도 루트의 공용 data.py(make_windows 등)를 그대로 쓰기 위해
+# 루트 디렉터리를 sys.path에 추가 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import make_windows, split_data, extract_features
 

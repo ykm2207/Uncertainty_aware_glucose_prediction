@@ -8,11 +8,17 @@
 # 순수 학습 루프라 데이터셋에 종속적이지 않지만, train.py를 그대로 import하면
 # 그 파일 하단의 HUPA 데이터 로딩 코드가 같이 실행돼버리므로(Preprocessed 폴더가 없으면
 # 바로 에러) 여기서는 동일한 로직을 복사해서 둔다.
+import os
+import sys
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
+
+# cgmacros/ 폴더에서도 루트의 공용 data.py/model.py/utils.py를 그대로 쓰기 위해
+# 루트 디렉터리를 sys.path에 추가 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import normalize_features, BGDataset
 from data_cgmacros import prepare_dataset_cgmacros, compute_means_variances_cgmacros

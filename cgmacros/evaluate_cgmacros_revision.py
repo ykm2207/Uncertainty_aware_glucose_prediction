@@ -1,39 +1,35 @@
-# evaluate_cgmacros.py
-# CGMacros로 학습한 TEM 모델을 테스트셋으로 평가한다.
-#
-# 이번 실험 조건은 RMSE/MAE를 1차 지표로 요구했으므로 그것을 가장 먼저 출력하고,
-# 원 논문이 쓰던 MARD/DTS 존/Brier/AUC/ECP도 참고용으로 이어서 계산한다.
-# 원 논문 지표들은 "저혈당/고혈당 위험구간을 얼마나 잘 잡아내는가", "예측 불확실성이
-# 실제 오차와 얼마나 잘 맞아떨어지는가(calibration)"까지 보는데, RMSE/MAE는 점 예측의
-# 평균적인 크기 오차만 본다. 즉 RMSE/MAE가 낮아도 저혈당을 못 잡아낼 수 있고,
-# 반대로 원 논문 지표가 나빠도 RMSE/MAE는 괜찮아 보일 수 있다 -> 이 차이를 evaluate 끝에
-# 명시적으로 출력해서 "지표를 바꿨을 때 뭐가 달라지는지" 확인할 수 있게 했다.
+# evaluate_cgmacros_revision.py
+# 절단 복사본(data_revision)으로 학습한 TEM 모델을 테스트셋으로 평가한다.
+# evaluate_cgmacros.py와 지표 계산 로직은 완전히 동일하고(같은 함수를 복사해서 유지 -
+# 두 결과를 나란히 비교해야 하므로 지표 정의가 절대 달라지면 안 됨), 데이터 소스와
+# 모델 로드 경로만 절단본 쪽(REVISION)으로 바꿨다.
+import os
+import sys
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from scipy.stats import spearmanr, t as student_t
 import matplotlib.pyplot as plt
 
+# cgmacros/ 폴더에서도 루트의 공용 data.py/model.py/utils.py를 그대로 쓰기 위해
+# 루트 디렉터리를 sys.path에 추가 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data import normalize_features, BGDataset
-from data_cgmacros import prepare_dataset_cgmacros, compute_means_variances_cgmacros
+from data_cgmacros import prepare_dataset_cgmacros_revision, compute_means_variances_cgmacros_revision
 from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DTS_error_zone_count,
                     f_auc_hypo_score, f_auc_hyper_score, f_brier_hypo_score, f_brier_hyper_score)
 from model import e_Transformers
 from configs_cgmacros import (
-    DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, PATIENT_LIMIT,
+    DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, PATIENT_LIMIT,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH, ECP_GRAPH_SAVE_PATH,
+    MODEL_SAVE_PATH_REVISION, ECP_GRAPH_SAVE_PATH_REVISION,
 )
 
 
 def evaluate_model_evidential(model, loader, sigma_g, mu_g, ecp_graph_save_path):
-    """
-    evaluate.py의 동일 함수와 로직은 같되, 맨 앞에 RMSE/MAE를 추가로 계산해서
-    metrics_dict에 넣는다. 저혈당/고혈당 샘플이 0건인 경우(작은 patient_limit로
-    스모크 테스트 할 때 흔함) 관련 지표 계산에서 나눗셈 경고/NaN이 나지 않도록
-    "정의 불가"로 명시적으로 표시하고 건너뛴다.
-    """
+    """evaluate_cgmacros.py의 동일 함수와 완전히 같은 로직."""
     device = next(model.parameters()).device
     model.eval()
 
@@ -135,7 +131,7 @@ def evaluate_model_evidential(model, loader, sigma_g, mu_g, ecp_graph_save_path)
     # plt.xlabel("Nominal coverage prob.")
     # plt.ylabel("Empirical coverage prob.")
     # plt.legend(fontsize=9)
-    # plt.title("Error Calibration Plot (CGMacros)", fontsize=10)
+    # plt.title("Error Calibration Plot (CGMacros, 절단본)", fontsize=10)
     # plt.tight_layout()
     # plt.savefig(ecp_graph_save_path, dpi=300, bbox_inches="tight")
     # plt.close()
@@ -149,16 +145,14 @@ def make_loader(X, Y, batch_size, shuffle=False):
 
 
 def main():
-    print("=== CGMacros 데이터 로딩 ===")
-    data_splits = prepare_dataset_cgmacros(
-        DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
-        patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
+    print("=== CGMacros 절단 복사본(data_revision) 데이터 로딩 ===")
+    data_splits = prepare_dataset_cgmacros_revision(
+        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
+        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
     )
-    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros(
-        DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
-        patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
+    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
+        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
+        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
     )
 
     data_norm = {}
@@ -175,23 +169,19 @@ def main():
         input_dim=len(FEATURES), d_model=D_MODEL, n_heads=N_HEADS,
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     ).to(device)
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH_REVISION, map_location=device))
 
-    print("=== 평가 시작 ===")
-    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH)
+    print("=== 평가 시작 (절단본) ===")
+    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH_REVISION)
 
-    print("\n[CGMacros 평가 결과]")
+    print("\n[CGMacros 절단본 평가 결과]")
     for k, v in metrics.items():
         print(f"{k}: {v:.3f}" if not np.isnan(v) else f"{k}: 정의 불가(해당 샘플 없음)")
 
     print(
-        "\n[지표 변경에 따른 차이 안내]\n"
-        "RMSE/MAE는 예측값과 실제값의 평균적인 크기 오차만 반영하는 지표입니다.\n"
-        "원 논문(HUPA 기준)이 핵심으로 삼은 MARD/DTS 존 정확도/Brier/AUC/ECP(MCE)는\n"
-        "저혈당·고혈당처럼 임상적으로 위험한 구간을 얼마나 잘 잡아내는지, 그리고\n"
-        "모델이 내놓은 불확실성(alpha/beta/nu)이 실제 오차 분포와 얼마나 맞는지(calibration)까지 봅니다.\n"
-        "이번 실험은 RMSE/MAE만 쓰기로 해서 그 지표들은 현재 계산에서 주석처리해뒀습니다\n"
-        "(evaluate_model_evidential 함수 내부, 필요하면 주석만 풀면 다시 계산됨)."
+        "\n[참고] 이 결과는 HR/Calories 긴 결측 구간을 잘라낸(평균 89% 데이터 유지) "
+        "복사본으로 학습·평가한 것입니다. evaluate_cgmacros.py(원본, 메모리에서 즉석 절단)와\n"
+        "지표 정의는 동일하므로 두 결과를 직접 비교해 '절단 방식 차이가 성능에 영향을 주는지' 확인할 수 있습니다."
     )
 
 

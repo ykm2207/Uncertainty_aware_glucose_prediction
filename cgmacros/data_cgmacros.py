@@ -9,9 +9,15 @@
 #   반면 make_windows/split_data/extract_features/compute_means_variances의 "본계산" 부분은
 #   데이터셋과 무관한 순수 함수이므로 data.py에서 그대로 가져다 쓴다(중복 구현 방지).
 import os
+import sys
 import glob
 import numpy as np
 import pandas as pd
+
+# 이 파일은 cgmacros/ 폴더 안에 있지만, 루트의 공용 data.py(make_windows 등)를
+# 그대로 가져다 쓴다. 하위 폴더로 옮기면서 파이썬이 루트를 기본으로 찾지 못하므로
+# 루트 디렉터리를 sys.path에 직접 추가해준다 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import make_windows, split_data, extract_features
 

@@ -1,5 +1,10 @@
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# cgmacros/ 폴더로 이동하면서, 결과 이미지(ma_check.png)가 어디서 실행하든
+# 항상 이 스크립트와 같은 폴더에 저장되도록 저장 경로를 스크립트 기준 상대경로로 고정.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 1) 파일 경로 — 실제 경로로 수정
 path = "/Users/yoo/Uncertainty_aware_glucose_prediction/data/CGMacros/CGMacros-001/CGMacros-001.csv"
@@ -21,5 +26,5 @@ plt.xlabel("시간 (분)")
 plt.ylabel("혈당 (mg/dL)")
 plt.legend()
 plt.tight_layout()
-plt.savefig("ma_check.png", dpi=150)   # 발표 자료용으로 저장
+plt.savefig(os.path.join(SCRIPT_DIR, "ma_check.png"), dpi=150)   # 발표 자료용으로 저장
 plt.show()

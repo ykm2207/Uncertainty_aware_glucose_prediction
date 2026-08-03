@@ -1,29 +1,40 @@
-# evaluate_cgmacros_revision.py
-# 절단 복사본(data_revision)으로 학습한 TEM 모델을 테스트셋으로 평가한다.
-# evaluate_cgmacros.py와 지표 계산 로직은 완전히 동일하고(같은 함수를 복사해서 유지 -
-# 두 결과를 나란히 비교해야 하므로 지표 정의가 절대 달라지면 안 됨), 데이터 소스와
-# 모델 로드 경로만 절단본 쪽(REVISION)으로 바꿨다.
+# evaluate_shanghai.py
+# Shanghai_T2DM으로 학습한 TEM 모델을 테스트셋으로 평가한다.
+# 구조/지표 구성은 evaluate_cgmacros.py와 동일 (RMSE/MAE를 1차로, 원 논문 지표는 참고용).
+#
+# 추가로 T2DM 관련 주의사항: 원 논문(HUPA)은 1형 당뇨(T1D) 환자 대상이었고, 이번 실험은
+# 2형 당뇨(T2DM) 환자 데이터를 쓴다. T2DM은 인슐린 저항성이 주된 병태생리라 혈당 변동
+# 패턴이 T1D와 다를 수 있고(급격한 스파이크가 상대적으로 적거나, 반대로 식후 고혈당이
+# 오래 지속되는 등), evidential 모델이 학습한 불확실성 보정이 T1D 기준으로 튜닝된
+# 원 논문과 그대로 맞는다는 보장은 없다. 이 스크립트가 계산하는 지표(특히 MCE=보정 오차,
+# Correlation with error)를 보고 실제로 문제가 있는지 확인해야 한다.
+import os
+import sys
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from scipy.stats import spearmanr, t as student_t
 import matplotlib.pyplot as plt
 
+# shanghai/ 폴더에서도 루트의 공용 data.py/model.py/utils.py를 그대로 쓰기 위해
+# 루트 디렉터리를 sys.path에 추가 (repo 루트에서 실행하는 걸 기준으로 함).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data import normalize_features, BGDataset
-from data_cgmacros import prepare_dataset_cgmacros_revision, compute_means_variances_cgmacros_revision
+from data_shanghai import prepare_dataset_shanghai, compute_means_variances_shanghai
 from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DTS_error_zone_count,
                     f_auc_hypo_score, f_auc_hyper_score, f_brier_hypo_score, f_brier_hyper_score)
 from model import e_Transformers
-from configs_cgmacros import (
-    DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, PATIENT_LIMIT,
+from configs_shanghai import (
+    DATA_DIR, FEATURES, COLUMN_MAP,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, MIN_SESSION_ROWS, SESSION_LIMIT,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH_REVISION, ECP_GRAPH_SAVE_PATH_REVISION,
+    MODEL_SAVE_PATH, ECP_GRAPH_SAVE_PATH,
 )
 
 
 def evaluate_model_evidential(model, loader, sigma_g, mu_g, ecp_graph_save_path):
-    """evaluate_cgmacros.py의 동일 함수와 완전히 같은 로직."""
+    """evaluate_cgmacros.py의 동일 함수와 완전히 같은 로직 (지표 정의를 두 데이터셋 간 동일하게 유지)."""
     device = next(model.parameters()).device
     model.eval()
 
@@ -125,7 +136,7 @@ def evaluate_model_evidential(model, loader, sigma_g, mu_g, ecp_graph_save_path)
     # plt.xlabel("Nominal coverage prob.")
     # plt.ylabel("Empirical coverage prob.")
     # plt.legend(fontsize=9)
-    # plt.title("Error Calibration Plot (CGMacros, 절단본)", fontsize=10)
+    # plt.title("Error Calibration Plot (Shanghai T2DM)", fontsize=10)
     # plt.tight_layout()
     # plt.savefig(ecp_graph_save_path, dpi=300, bbox_inches="tight")
     # plt.close()
@@ -139,14 +150,14 @@ def make_loader(X, Y, batch_size, shuffle=False):
 
 
 def main():
-    print("=== CGMacros 절단 복사본(data_revision) 데이터 로딩 ===")
-    data_splits = prepare_dataset_cgmacros_revision(
-        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+    print("=== Shanghai_T2DM 데이터 로딩 ===")
+    data_splits = prepare_dataset_shanghai(
+        DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
     )
-    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
-        DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-        L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+    mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_shanghai(
+        DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
     )
 
     data_norm = {}
@@ -163,19 +174,24 @@ def main():
         input_dim=len(FEATURES), d_model=D_MODEL, n_heads=N_HEADS,
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     ).to(device)
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH_REVISION, map_location=device))
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
 
-    print("=== 평가 시작 (절단본) ===")
-    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH_REVISION)
+    print("=== 평가 시작 ===")
+    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH)
 
-    print("\n[CGMacros 절단본 평가 결과]")
+    print("\n[Shanghai_T2DM 평가 결과]")
     for k, v in metrics.items():
         print(f"{k}: {v:.3f}" if not np.isnan(v) else f"{k}: 정의 불가(해당 샘플 없음)")
 
     print(
-        "\n[참고] 이 결과는 HR/Calories 긴 결측 구간을 잘라낸(평균 89% 데이터 유지) "
-        "복사본으로 학습·평가한 것입니다. evaluate_cgmacros.py(원본, 메모리에서 즉석 절단)와\n"
-        "지표 정의는 동일하므로 두 결과를 직접 비교해 '절단 방식 차이가 성능에 영향을 주는지' 확인할 수 있습니다."
+        "\n[지표 변경에 따른 차이 안내]\n"
+        "RMSE/MAE는 예측값과 실제값의 평균적인 크기 오차만 반영하는 지표입니다.\n"
+        "원 논문(HUPA, T1D 기준)이 핵심으로 삼은 MARD/DTS 존 정확도/Brier/AUC/ECP(MCE)는\n"
+        "저혈당·고혈당 위험구간 탐지 성능과 불확실성 보정 품질까지 봅니다.\n"
+        "이번 실험은 RMSE/MAE만 쓰기로 해서 그 지표들은 현재 계산에서 주석처리해뒀습니다\n"
+        "(evaluate_model_evidential 함수 내부, 필요하면 주석만 풀면 다시 계산됨).\n"
+        "또한 이 실험은 원 논문과 달리 T2DM 데이터를 사용했으므로, 나중에 다시 켤 때는\n"
+        "T1D 기준으로 설계된 원 논문 결과와 다르게 나올 수 있다는 점도 감안해야 합니다."
     )
 
 
