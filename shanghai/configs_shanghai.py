@@ -37,7 +37,7 @@ SAMPLE_INTERVAL_MIN = 15
 INPUT_TIMESTEPS = 12
 
 # CGMacros와 동일하게 "분" 단위로 지정하고 샘플링 간격으로 스텝 수를 자동 환산한다.
-HORIZON_MINUTES = 30  # 60으로 바꾸면 60분 뒤 예측 (15분 간격이므로 4스텝)
+HORIZON_MINUTES = 60  # AUTO-SET by run_remaining_experiments.sh
 HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
 
 # 윈도우(L)+예측시점(H)조차 못 채우는 너무 짧은 세션은 자동 제외.
