@@ -288,15 +288,51 @@ def _concat_or_empty(arrays, fallback_shape):
     return np.concatenate(arrays, axis=0)
 
 
-def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_map,
-                              L, H, patient_limit=None, max_gap_for_interp_min=15):
+def decimate_segment(data_array, resample_factor):
     """
-    전체 CGMacros 환자를 로드 -> 결측 기준으로 구간 분리 -> 각 구간 안에서만
-    슬라이딩 윈도우 생성 -> train/val/test로 나눠 전체 환자에 대해 concat한다.
+    1분 간격 연속 구간을 resample_factor 배수만큼 다운샘플링한다 (예: 5 -> 5분 간격).
+
+    왜 필요한가:
+        원 논문(HUPA)은 5분 간격 x 36스텝 = 3시간 입력창을 쓰는데, CGMacros는 원본이
+        1분 그리드라 36스텝이 36분(3시간의 1/5)밖에 안 됐다. 이 함수로 5분 간격으로
+        다운샘플링하면 INPUT_TIMESTEPS=36을 그대로 둬도 36 x 5분 = 정확히 3시간이 되어
+        논문과 입력 시간 범위가 맞춰진다.
+
+        참고(⚠️ 근본적으로 남는 한계): CGMacros의 Libre GL은 실제로 15분 간격 실측을
+        1분 단위로 선형보간한 값이다. 5분 그리드로 뽑아도 5분마다 찍힌 값 중 1/3만
+        실측이고 나머지 2/3는 여전히 보간값이다(1분 그리드였을 땐 실측 비율이 1/15=6.7%였으니
+        그래도 개선은 됨). 예측 타깃(Y)이 보간값에 걸리면 "이미 아는 두 실측값 사이 직선"을
+        맞히는 셈이라 실제보다 쉬운 문제가 될 수 있다는 점은 평가 결과와 함께 반드시
+        같이 보고해야 하는 한계다. (segment_by_gaps로 이미 결측 절단/보간이 끝난 뒤,
+        여기서는 순수하게 "몇 번째 행마다 하나씩 뽑을지"만 처리한다.)
+
+    Args:
+        data_array: segment_by_gaps()/segment_trimmed_by_timestamp()가 반환한,
+                    1분 간격 연속 구간(np.ndarray)
+        resample_factor: 다운샘플링 배수. 1이면 원본(1분) 그대로, 5면 5분 간격.
+
+    Returns:
+        np.ndarray: resample_factor번째 행마다 하나씩 뽑은 다운샘플링된 배열
+    """
+    if resample_factor <= 1:
+        return data_array
+    return data_array[::resample_factor]
+
+
+def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_map,
+                              L, H, patient_limit=None, max_gap_for_interp_min=15,
+                              resample_factor=1):
+    """
+    전체 CGMacros 환자를 로드 -> 결측 기준으로 구간 분리 -> (필요시 5분 등으로 다운샘플링) ->
+    각 구간 안에서만 슬라이딩 윈도우 생성 -> train/val/test로 나눠 전체 환자에 대해 concat한다.
 
     data.py의 prepare_dataset()과 구조는 동일하되(환자 루프 -> 분할 -> 윈도우 -> concat),
     "환자 1명 = CSV 1개 = 항상 연속" 가정이 깨지므로 "환자 1명 = 여러 개의 연속 구간"으로
     한 단계 더 들어간 이중 루프 구조다.
+
+    다운샘플링(resample_factor)은 결측 절단/보간이 이미 끝난 1분 그리드 구간에 대해
+    적용한다 -> segment_by_gaps의 결측 판정 로직(분 단위 임계값)이 항상 1분 그리드
+    기준으로 정확하게 동작하도록, 순서를 "절단 먼저 -> 다운샘플링 나중"으로 고정했다.
     """
     splits = {"train": ([], []), "val": ([], []), "test": ([], []), "train_val": ([], [])}
 
@@ -309,7 +345,8 @@ def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_m
             print(f"  [건너뜀] {pid}: 사용 가능한 연속 구간이 없음 (필수 피처가 거의 전부 결측)")
             continue
 
-        for data_array in segments:
+        for raw_segment in segments:
+            data_array = decimate_segment(raw_segment, resample_factor)
             if len(data_array) < L + H:
                 # 이 구간은 입력창(L)+예측시점(H)조차 못 채우는 너무 짧은 구간 -> 스킵
                 continue
@@ -339,14 +376,16 @@ def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_m
 
 
 def compute_means_variances_cgmacros(data_dir, feature_names, raw_column_names, column_map,
-                                      L, H, patient_limit=None, max_gap_for_interp_min=15):
+                                      L, H, patient_limit=None, max_gap_for_interp_min=15,
+                                      resample_factor=1):
     """
     정규화(z-score)에 쓸 평균/표준편차를 train 구간에서만 계산한다.
 
     data.py의 compute_means_variances()와 동일한 역할이지만, prepare_dataset_cgmacros()와
-    마찬가지로 "구간 분리"를 거친 뒤의 train 부분만 모아서 통계를 낸다.
+    마찬가지로 "구간 분리 -> (필요시) 다운샘플링"을 거친 뒤의 train 부분만 모아서 통계를 낸다.
     val/test 정보가 통계에 섞이면 안 되므로(데이터 누출 방지) train만 사용하는 원칙은
-    원본 파이프라인과 동일하게 유지했다.
+    원본 파이프라인과 동일하게 유지했다. resample_factor는 prepare_dataset_cgmacros()에
+    준 값과 반드시 같아야 한다(다르면 정규화 통계와 실제 학습 데이터의 분포가 어긋남).
     """
     patients = discover_patients(data_dir, patient_limit)
     train_X_list = []
@@ -354,7 +393,8 @@ def compute_means_variances_cgmacros(data_dir, feature_names, raw_column_names, 
     for pid, csv_path in patients:
         feature_df = load_single_patient_cgmacros(csv_path, feature_names, raw_column_names)
         segments = segment_by_gaps(feature_df, max_gap_for_interp_min)
-        for data_array in segments:
+        for raw_segment in segments:
+            data_array = decimate_segment(raw_segment, resample_factor)
             if len(data_array) < L + H:
                 continue
             train_data, _, _, _ = split_data(data_array)
@@ -431,11 +471,12 @@ def segment_trimmed_by_timestamp(feature_df_with_ts, normal_interval_min=1):
 
 
 def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names, column_map,
-                                       L, H, patient_limit=None):
+                                       L, H, patient_limit=None, resample_factor=1):
     """
     data_revision(절단 복사본)으로부터 train/val/test 윈도우를 만든다.
     prepare_dataset_cgmacros()와 구조는 동일하고, "결측 탐지 방식"만 다르다
     (원본: NaN 패턴 / 절단본: Timestamp 간격) - 위 모듈 설명 참고.
+    resample_factor는 decimate_segment() 참고 (예: 5 -> 5분 간격으로 다운샘플링).
     """
     splits = {"train": ([], []), "val": ([], []), "test": ([], []), "train_val": ([], [])}
 
@@ -448,7 +489,8 @@ def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names,
             print(f"  [건너뜀] {pid}: 사용 가능한 연속 구간이 없음")
             continue
 
-        for data_array in segments:
+        for raw_segment in segments:
+            data_array = decimate_segment(raw_segment, resample_factor)
             if len(data_array) < L + H:
                 continue
 
@@ -477,15 +519,17 @@ def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names,
 
 
 def compute_means_variances_cgmacros_revision(data_dir, feature_names, raw_column_names, column_map,
-                                               L, H, patient_limit=None):
-    """정규화 통계를 절단 복사본의 train 구간에서만 계산한다 (원본용 함수와 동일한 원칙)."""
+                                               L, H, patient_limit=None, resample_factor=1):
+    """정규화 통계를 절단 복사본의 train 구간에서만 계산한다 (원본용 함수와 동일한 원칙).
+    resample_factor는 prepare_dataset_cgmacros_revision()에 준 값과 반드시 같아야 한다."""
     patients = discover_patients(data_dir, patient_limit)
     train_X_list = []
 
     for pid, csv_path in patients:
         feature_df = load_single_patient_revision(csv_path, feature_names, raw_column_names)
         segments = segment_trimmed_by_timestamp(feature_df)
-        for data_array in segments:
+        for raw_segment in segments:
+            data_array = decimate_segment(raw_segment, resample_factor)
             if len(data_array) < L + H:
                 continue
             train_data, _, _, _ = split_data(data_array)

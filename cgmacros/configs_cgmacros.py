@@ -49,18 +49,28 @@ RAW_COLUMN_NAMES = {
 # =========================
 # 시간 해상도 / 윈도우 설정
 # =========================
-# CGMacros는 1분 간격 그리드 (원 논문 HUPA는 5분 간격이었음 -> 그대로 갖다 쓰면 안 됨)
-SAMPLE_INTERVAL_MIN = 1
+# CGMacros 원본 CSV는 1분 간격 그리드다 (Libre GL 자체는 15분 실측을 1분 단위로
+# 선형보간한 값 - 진짜 측정 주기는 15분). 원 논문(HUPA)은 5분 간격을 썼으므로,
+# NATIVE(원본 그리드)와 SAMPLE(리샘플링 후 실제로 학습에 쓰는 간격)을 구분해서 관리한다.
+NATIVE_SAMPLE_INTERVAL_MIN = 1
 
-# 실험 조건에서 지정된 입력 타임스텝 수 (36스텝 x 1분 = 36분 입력창).
-# 참고: 원 논문은 5분 x 36스텝 = 180분(3시간) 입력이었으므로, 이 설정은
-# 논문 대비 입력 시간창이 1/5 수준으로 짧다 -> 결과 해석 시 감안 필요 (README/보고 시 명시).
+# 원 논문과 샘플링 간격을 맞추기 위해 5분으로 다운샘플링한다 (data_cgmacros.decimate_segment
+# 참고). RESAMPLE_FACTOR = SAMPLE_INTERVAL_MIN // NATIVE_SAMPLE_INTERVAL_MIN 만큼
+# 1분 그리드에서 몇 번째 행마다 하나씩 뽑을지를 뜻한다 (5 -> 5행마다 1개).
+# ⚠️ 리샘플링해도 5분 그리드 값의 2/3는 여전히 보간값이다(진짜 측정 주기가 15분이라서).
+# 이 한계는 리샘플링으로 해결되지 않으므로 결과 보고 시 반드시 같이 명시할 것.
+SAMPLE_INTERVAL_MIN = 5
+RESAMPLE_FACTOR = SAMPLE_INTERVAL_MIN // NATIVE_SAMPLE_INTERVAL_MIN
+
+# 실험 조건에서 지정된 입력 타임스텝 수. 이제 SAMPLE_INTERVAL_MIN=5이므로
+# 36스텝 x 5분 = 180분(3시간) 입력창 -> 원 논문(5분 x 36스텝 = 3시간)과 시간 범위가
+# 정확히 일치한다 (예전엔 1분 그리드 그대로 써서 36분=논문의 1/5 수준이었음).
 INPUT_TIMESTEPS = 36
 
 # 예측 시점(horizon)을 "분" 단위로 지정하고, 실제 스텝 수는 샘플링 간격으로
 # 자동 환산한다. 이렇게 하면 데이터셋마다 샘플링 간격이 달라도 "30분 뒤 예측"이라는
 # 의미가 코드 전역에서 일관되게 유지된다 (하드코딩된 스텝 수를 쓰면 헷갈리기 쉬움).
-HORIZON_MINUTES = 30  # 60으로 바꾸면 60분 뒤 예측 실험이 됨
+HORIZON_MINUTES = 30  # 60으로 바꾸면 60분 뒤 예측 실험이 됨 (5분 간격 기준 6/12스텝)
 HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
 
 # =========================
@@ -72,6 +82,8 @@ HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
 # 별도의 연속 구간(segment)으로 분리한다. 서로 무관한 시간대를 이어붙여
 # 하나의 윈도우로 만드는 것을 막기 위함. data_cgmacros.report_missingness()로
 # 환자별 결측 패턴을 먼저 확인하고 이 값을 조정할 것.
+# 이 절단 판정은 항상 NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 먼저 이뤄지고,
+# 그 이후에 RESAMPLE_FACTOR만큼 다운샘플링한다 (순서가 바뀌면 분 단위 임계값 계산이 틀어짐).
 MAX_GAP_FOR_INTERP_MIN = 15
 
 # =========================

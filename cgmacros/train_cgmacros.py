@@ -26,7 +26,7 @@ from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, g
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, RESAMPLE_FACTOR, PATIENT_LIMIT,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
     MODEL_SAVE_PATH, LOSS_SAVE_PATH,
@@ -137,12 +137,14 @@ def main():
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
+        resample_factor=RESAMPLE_FACTOR,
     )
 
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros(
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
+        resample_factor=RESAMPLE_FACTOR,
     )
 
     # train 통계(mu_gen/sigma_gen)만으로 모든 split을 정규화 -> val/test 정보가

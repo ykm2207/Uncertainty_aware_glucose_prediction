@@ -25,7 +25,7 @@ from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, g
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, RESAMPLE_FACTOR, PATIENT_LIMIT,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
     MODEL_SAVE_PATH_REVISION, LOSS_SAVE_PATH_REVISION,
@@ -132,10 +132,12 @@ def main():
     data_splits = prepare_dataset_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+        resample_factor=RESAMPLE_FACTOR,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
+        resample_factor=RESAMPLE_FACTOR,
     )
 
     data_norm = {}
