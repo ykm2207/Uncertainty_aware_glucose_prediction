@@ -18,6 +18,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import make_windows, split_data, extract_features
+from utils import apply_causal_moving_average
 
 
 def discover_sessions(data_dir, session_limit=None):
@@ -110,16 +111,23 @@ def _concat_or_empty(arrays, fallback_shape):
 
 
 def prepare_dataset_shanghai(data_dir, feature_names, column_map, L, H,
-                              session_limit=None, min_session_rows=None):
+                              session_limit=None, min_session_rows=None,
+                              ma_window=None, apply_ma_to_y=False):
     """
     전체 Shanghai 세션을 로드 -> (환자가 아니라) 세션 단위로 train/val/test 분할 ->
-    윈도우 생성 -> 전체 세션에 대해 concat한다.
+    (필요시 이동평균) -> 윈도우 생성 -> 전체 세션에 대해 concat한다.
 
     왜 "환자"가 아니라 "세션" 단위로 도는가:
         같은 환자가 여러 번 방문했어도 방문 사이에는 몇 주~몇 달의 공백이 있어
         하나의 연속된 시계열로 볼 수 없다. 그래서 data.py의 prepare_dataset()이
         "환자 1명 = CSV 1개 = 연속 시계열"로 가정하고 도는 것과 동일한 패턴을
         "세션 1개 = 연속 시계열" 단위로 그대로 적용한다.
+
+    이동평균은 cgmacros/data_cgmacros.py의 prepare_dataset_cgmacros()와 완전히 동일한
+    원칙을 따른다: raw(원본)와 smoothed(스무딩) 두 배열을 각각 만들어서, X는 스무딩된
+    쪽에서, Y(타깃)는 apply_ma_to_y=False(기본값, 권장)면 raw 쪽에서 추출한다.
+    Shanghai는 피처가 glucose 하나뿐이라 "X도 결국 glucose, Y도 glucose"이지만,
+    이 둘을 서로 다른 배열(스무딩 여부만 다름)에서 뽑는다는 점이 핵심이다.
     """
     splits = {"train": ([], []), "val": ([], []), "test": ([], []), "train_val": ([], [])}
 
@@ -135,18 +143,28 @@ def prepare_dataset_shanghai(data_dir, feature_names, column_map, L, H,
             n_skipped_error += 1
             continue
 
-        data_array = df.to_numpy(dtype=float)
-        if min_session_rows is not None and len(data_array) < min_session_rows:
+        raw_segment = df.to_numpy(dtype=float)
+        if min_session_rows is not None and len(raw_segment) < min_session_rows:
             n_skipped_short += 1
             continue
 
-        train_data, val_data, test_data, train_val_data = split_data(data_array)
+        smoothed_segment = (
+            apply_causal_moving_average(raw_segment, ma_window)
+            if ma_window is not None else raw_segment
+        )
 
-        for key, split_arr in (("train", train_data), ("val", val_data),
-                                ("test", test_data), ("train_val", train_val_data)):
-            if len(split_arr) < L + H:
+        raw_train, raw_val, raw_test, raw_train_val = split_data(raw_segment)
+        sm_train, sm_val, sm_test, sm_train_val = split_data(smoothed_segment)
+
+        for key, raw_split, sm_split in (
+            ("train", raw_train, sm_train), ("val", raw_val, sm_val),
+            ("test", raw_test, sm_test), ("train_val", raw_train_val, sm_train_val),
+        ):
+            if len(raw_split) < L + H:
                 continue
-            X, Y = extract_features(split_arr, feature_names, column_map)
+            X, _ = extract_features(sm_split, feature_names, column_map)
+            Y_source = sm_split if apply_ma_to_y else raw_split
+            _, Y = extract_features(Y_source, feature_names, column_map)
             Xw, Yw = make_windows(X, Y, L, H)
             if len(Xw) == 0:
                 continue
@@ -167,9 +185,12 @@ def prepare_dataset_shanghai(data_dir, feature_names, column_map, L, H,
 
 
 def compute_means_variances_shanghai(data_dir, feature_names, column_map, L, H,
-                                      session_limit=None, min_session_rows=None):
+                                      session_limit=None, min_session_rows=None,
+                                      ma_window=None):
     """
     정규화용 평균/표준편차를 train 구간에서만 계산한다 (data_cgmacros의 동명 함수와 동일한 목적/원칙).
+    ma_window는 prepare_dataset_shanghai()에 준 값과 반드시 같아야 한다 - 모델이 실제로
+    보는 입력(X, 항상 스무딩된 쪽)을 기준으로 통계를 내야 하기 때문.
     """
     sessions = discover_sessions(data_dir, session_limit)
     train_X_list = []
@@ -179,11 +200,16 @@ def compute_means_variances_shanghai(data_dir, feature_names, column_map, L, H,
             df = load_single_session_shanghai(path)
         except Exception:
             continue
-        data_array = df.to_numpy(dtype=float)
-        if min_session_rows is not None and len(data_array) < min_session_rows:
+        raw_segment = df.to_numpy(dtype=float)
+        if min_session_rows is not None and len(raw_segment) < min_session_rows:
             continue
 
-        train_data, _, _, _ = split_data(data_array)
+        smoothed_segment = (
+            apply_causal_moving_average(raw_segment, ma_window)
+            if ma_window is not None else raw_segment
+        )
+
+        train_data, _, _, _ = split_data(smoothed_segment)
         if len(train_data) < L + H:
             continue
         X_train, _ = extract_features(train_data, feature_names, column_map)

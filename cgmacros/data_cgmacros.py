@@ -20,6 +20,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import make_windows, split_data, extract_features
+from utils import apply_causal_moving_average
 
 
 def discover_patients(data_dir, patient_limit=None):
@@ -317,40 +318,6 @@ def decimate_segment(data_array, resample_factor):
     if resample_factor <= 1:
         return data_array
     return data_array[::resample_factor]
-
-
-def apply_causal_moving_average(data_array, window):
-    """
-    각 피처 컬럼에 대해 "과거 방향(causal)" 이동평균을 적용한다.
-
-    왜 causal(과거방향)인가:
-        처음 MA 효과를 확인할 때 썼던 `rolling(center=True)`는 각 시점의 평균에
-        미래 시점 값까지 섞여 들어간다. 학습 시점에는 미래 값을 알 수 없으므로
-        이건 정보 누출(data leakage)이다. `rolling(window, center=False)`는
-        현재 시점과 그 이전 window-1개 값만 사용해서 평균을 내므로 실사용(추론) 시점과
-        동일한 조건이 된다.
-
-    왜 구간 시작부는 min_periods=1로 처리하는가:
-        구간 맨 앞부분은 아직 window개만큼 과거 데이터가 안 쌓여있다. min_periods=1을
-        주면 그 시점까지 있는 값만으로 평균을 내고(예: 앞에서 3번째 시점이면 3개 평균),
-        NaN으로 날려서 데이터를 통째로 버리는 것보다 낫다.
-
-    ⚠️ Y(타깃)에는 이 함수를 적용하면 안 된다: 타깃까지 평활하면 모델이 "평활된 값"을
-    맞히는 셈이 되어 문제가 실제보다 쉬워지고(RMSE 인위적 개선), 저/고혈당처럼 급격한
-    변화가 사라져 임상 지표가 무의미해진다 (8/2 실측 검증 결과: MA200을 원신호에
-    그대로 적용하면 다수 환자에서 저혈당 이벤트가 완전히 사라짐). 그래서 이 함수는
-    항상 입력(X) 쪽에만 호출하도록 설계했다 (prepare_dataset_cgmacros 참고).
-
-    Args:
-        data_array: 1분 간격 연속 구간(np.ndarray), 컬럼 순서는 feature_names와 동일
-        window: 이동평균 윈도우 크기 (행 개수 = 분 단위, 1분 그리드 기준)
-
-    Returns:
-        np.ndarray: 같은 shape의 평활된 배열
-    """
-    df = pd.DataFrame(data_array)
-    smoothed = df.rolling(window=window, min_periods=1, center=False).mean()
-    return smoothed.to_numpy()
 
 
 def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_map,

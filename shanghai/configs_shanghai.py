@@ -45,6 +45,25 @@ HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
 MIN_SESSION_ROWS = INPUT_TIMESTEPS + HORIZON_LENGTH + 10
 
 # =========================
+# 이동평균(MA) 정책
+# =========================
+# CGMacros와 동일한 원칙(cgmacros/configs_cgmacros.py 참고): 입력(X)에만 과거방향(causal)
+# 이동평균을 적용하고, 타깃(Y)은 항상 원본을 유지한다 (APPLY_MA_TO_Y=False 고정).
+#
+# 8/4 이전까지는 Shanghai를 MA 미적용 상태로 300epoch 학습했었다(그 결과는
+# ./shanghai_tem_model.pth로 이미 저장/커밋되어 있음). 이번에 MA를 추가하면서,
+# 그 결과를 덮어쓰지 않고 나란히 비교할 수 있도록 저장 경로를 MA 적용 여부에 따라
+# 자동으로 다르게 잡는다 (아래 "결과 저장 경로" 섹션 참고).
+#
+# 단위: Shanghai는 이미 15분 그리드라 별도 리샘플링이 없으므로, MA_WINDOW는
+# "15분 그리드 기준 행 개수"다. 67행 = 67 x 15분 = 1005분(~16.75시간) 스무딩 윈도우.
+# (8/2 실측 검증: 이 값을 원신호에 그대로 적용하면 저/고혈당 이벤트가 거의 다 사라짐 ->
+#  그래서 X에만 적용하고 Y는 원본 유지하는 지금 방식이 필수적임)
+APPLY_MOVING_AVERAGE = True
+MA_WINDOW = 67 if APPLY_MOVING_AVERAGE else None
+APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (임의로 True로 바꾸지 말 것)
+
+# =========================
 # 학습 설정 (실험 조건 지정값)
 # =========================
 BATCH_SIZE = 1024
@@ -70,6 +89,9 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로
 # =========================
-MODEL_SAVE_PATH = "./shanghai_tem_model.pth"
-LOSS_SAVE_PATH = "./shanghai_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = "./shanghai_ecp_graph_plot.png"
+# MA 적용 여부에 따라 자동으로 파일명이 갈라진다 -> MA 미적용으로 이미 저장된
+# 이전 결과(shanghai_tem_model.pth)를 덮어쓰지 않고 나란히 비교할 수 있음.
+_MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
+MODEL_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_ecp_graph_plot.png"

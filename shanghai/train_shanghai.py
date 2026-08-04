@@ -20,6 +20,7 @@ from model import e_Transformers
 from configs_shanghai import (
     DATA_DIR, FEATURES, COLUMN_MAP,
     INPUT_TIMESTEPS, HORIZON_LENGTH, MIN_SESSION_ROWS, SESSION_LIMIT,
+    MA_WINDOW, APPLY_MA_TO_Y,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
     MODEL_SAVE_PATH, LOSS_SAVE_PATH,
@@ -126,10 +127,11 @@ def main():
     data_splits = prepare_dataset_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
+        ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
-        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS, ma_window=MA_WINDOW,
     )
 
     data_norm = {}

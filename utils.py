@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import pandas as pd
 from sklearn.metrics import average_precision_score
 from scipy.stats import t as student_t
 
@@ -83,6 +84,45 @@ def get_device(preferred="mps"):
     # 이론상 cpu는 항상 True이므로 여기까지 오지 않지만, 방어적으로 폴백
     print("[device] 사용 가능한 backend를 찾지 못해 cpu로 폴백")
     return torch.device("cpu")
+
+
+def apply_causal_moving_average(data_array, window):
+    """
+    각 피처 컬럼에 대해 "과거 방향(causal)" 이동평균을 적용한다.
+    CGMacros/Shanghai 둘 다 쓰는 데이터셋 공용 함수라 여기(utils.py)에 둔다
+    (data.py는 원 논문 HUPA 파이프라인 파일이라 손대지 않기로 한 원칙 때문).
+
+    왜 causal(과거방향)인가:
+        `rolling(center=True)`는 각 시점의 평균에 미래 시점 값까지 섞여 들어간다.
+        학습 시점에는 미래 값을 알 수 없으므로 이건 정보 누출(data leakage)이다.
+        `rolling(window, center=False)`는 현재 시점과 그 이전 window-1개 값만
+        사용해서 평균을 내므로 실사용(추론) 시점과 동일한 조건이 된다.
+
+    왜 구간 시작부는 min_periods=1로 처리하는가:
+        구간 맨 앞부분은 아직 window개만큼 과거 데이터가 안 쌓여있다. min_periods=1을
+        주면 그 시점까지 있는 값만으로 평균을 내고(예: 앞에서 3번째 시점이면 3개 평균),
+        NaN으로 날려서 데이터를 통째로 버리는 것보다 낫다.
+
+    ⚠️ Y(타깃)에는 이 함수를 적용하면 안 된다: 타깃까지 평활하면 모델이 "평활된 값"을
+    맞히는 셈이 되어 문제가 실제보다 쉬워지고(RMSE 인위적 개선), 저/고혈당처럼 급격한
+    변화가 사라져 임상 지표가 무의미해진다 (8/2 CGMacros 실측 검증: MA200을 원신호에
+    그대로 적용하면 다수 환자에서 저혈당 이벤트가 완전히 사라짐 - Shanghai로도 동일하게
+    재현 확인됨). 그래서 이 함수는 항상 입력(X) 쪽에만 호출하도록 설계했다
+    (cgmacros/data_cgmacros.py, shanghai/data_shanghai.py의 prepare_dataset_* 함수 참고).
+
+    Args:
+        data_array: 연속 구간(np.ndarray), 컬럼 순서는 feature_names와 동일.
+                    윈도우 크기의 단위(분)는 이 배열의 행 간격과 일치해야 한다
+                    (예: 1분 그리드면 window=200은 200분, 15분 그리드면 window=67은
+                    67행=1005분을 의미하므로 그리드 간격에 맞는 값을 넣을 것).
+        window: 이동평균 윈도우 크기 (행 개수)
+
+    Returns:
+        np.ndarray: 같은 shape의 평활된 배열
+    """
+    df = pd.DataFrame(data_array)
+    smoothed = df.rolling(window=window, min_periods=1, center=False).mean()
+    return smoothed.to_numpy()
 
 
 def kl_reg_loss_term(u_obs, gamma, alpha, beta):
