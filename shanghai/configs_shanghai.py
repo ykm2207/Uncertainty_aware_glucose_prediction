@@ -59,7 +59,7 @@ MIN_SESSION_ROWS = INPUT_TIMESTEPS + HORIZON_LENGTH + 10
 # "15분 그리드 기준 행 개수"다. 67행 = 67 x 15분 = 1005분(~16.75시간) 스무딩 윈도우.
 # (8/2 실측 검증: 이 값을 원신호에 그대로 적용하면 저/고혈당 이벤트가 거의 다 사라짐 ->
 #  그래서 X에만 적용하고 Y는 원본 유지하는 지금 방식이 필수적임)
-APPLY_MOVING_AVERAGE = True
+APPLY_MOVING_AVERAGE = False
 MA_WINDOW = 67 if APPLY_MOVING_AVERAGE else None
 APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (임의로 True로 바꾸지 말 것)
 
