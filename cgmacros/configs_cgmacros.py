@@ -101,7 +101,7 @@ MAX_GAP_FOR_INTERP_MIN = 15
 # -> 그래서 기본값을 False로 바꿔 "MA 미적용 300epoch" 비교군을 만든다. 단위는 "분"이며
 # NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 적용된다(다운샘플링 전에 적용하므로
 # 5분 그리드 행 개수가 아니라 실제 분 단위로 정확히 200분).
-APPLY_MOVING_AVERAGE = False
+APPLY_MOVING_AVERAGE = True
 MA_WINDOW_MINUTES = 200
 MA_WINDOW = MA_WINDOW_MINUTES if APPLY_MOVING_AVERAGE else None
 APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (위 설명 참고, 임의로 True로 바꾸지 말 것)
