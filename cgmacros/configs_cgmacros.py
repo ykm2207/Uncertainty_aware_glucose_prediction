@@ -94,10 +94,14 @@ MAX_GAP_FOR_INTERP_MIN = 15
 # 항상 원본 그대로 둔다(APPLY_MA_TO_Y=False 고정, data_cgmacros.apply_causal_moving_average
 # 참고). 방향도 미래 정보 누출을 막기 위해 항상 과거방향(causal)만 사용한다.
 #
-# 8/4 결정: 팀 지정값 200으로 우선 진행하고, 결과가 너무 안 좋으면 이 값만 조정.
-# 단위는 "분"이며 NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 적용된다
-# (다운샘플링 전에 적용하므로 5분 그리드 행 개수가 아니라 실제 분 단위로 정확히 200분).
-APPLY_MOVING_AVERAGE = True
+# 8/4 결정: 팀 지정값 200으로 먼저 300epoch 학습해봤는데(결과: cgmacros_revision_ma_*),
+# MA 미적용 대비 RMSE/MAE/MARD/Zone 정확도/민감도가 전부 뚜렷하게 나빠짐 (Shanghai도 동일 경향).
+# "성능이 좋은 쪽을 고르는" 게 목적이 아니라 지정 조건을 그대로 재현해서 비교 보고하는 게
+# 목적이므로, MA 미적용 버전도 동일하게 300epoch 정식으로 돌려서 두 결과를 나란히 남긴다.
+# -> 그래서 기본값을 False로 바꿔 "MA 미적용 300epoch" 비교군을 만든다. 단위는 "분"이며
+# NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 적용된다(다운샘플링 전에 적용하므로
+# 5분 그리드 행 개수가 아니라 실제 분 단위로 정확히 200분).
+APPLY_MOVING_AVERAGE = False
 MA_WINDOW_MINUTES = 200
 MA_WINDOW = MA_WINDOW_MINUTES if APPLY_MOVING_AVERAGE else None
 APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (위 설명 참고, 임의로 True로 바꾸지 말 것)
@@ -130,12 +134,15 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로 (원본 HUPA 파이프라인의 산출물과 겹치지 않도록 파일명 분리)
 # =========================
-MODEL_SAVE_PATH = "./cgmacros_tem_model.pth"
-LOSS_SAVE_PATH = "./cgmacros_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = "./cgmacros_ecp_graph_plot.png"
+# Shanghai(configs_shanghai.py)와 동일하게, MA 적용 여부에 따라 파일명이 자동으로
+# 갈라지도록 해서 두 버전(MA 적용/미적용) 결과가 서로 덮어쓰지 않고 나란히 남는다.
+_MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
+MODEL_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_ecp_graph_plot.png"
 
 # data_revision(절단 복사본) 학습 결과물 경로 -- 원본(raw) 파이프라인 결과와
 # 섞이지 않도록 파일명을 다르게 둔다. train_cgmacros_revision.py/evaluate_cgmacros_revision.py 전용.
-MODEL_SAVE_PATH_REVISION = "./cgmacros_revision_tem_model.pth"
-LOSS_SAVE_PATH_REVISION = "./cgmacros_revision_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH_REVISION = "./cgmacros_revision_ecp_graph_plot.png"
+MODEL_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_ecp_graph_plot.png"
