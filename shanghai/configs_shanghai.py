@@ -89,9 +89,11 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로
 # =========================
-# MA 적용 여부에 따라 자동으로 파일명이 갈라진다 -> MA 미적용으로 이미 저장된
-# 이전 결과(shanghai_tem_model.pth)를 덮어쓰지 않고 나란히 비교할 수 있음.
+# MA 적용 여부 + horizon(30/60분)에 따라 자동으로 파일명이 갈라진다 -> 여러 버전이
+# 서로 덮어쓰지 않고 나란히 비교 가능 (horizon도 실험 조건에 "30/60분 둘 다"였는데
+# 8/4까지 30분만 돌렸음 -> 8/4 뒤늦게 반영).
 _MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
-MODEL_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = f"./shanghai{_MA_SUFFIX}_ecp_graph_plot.png"
+_H_SUFFIX = f"_h{HORIZON_MINUTES}"
+MODEL_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"

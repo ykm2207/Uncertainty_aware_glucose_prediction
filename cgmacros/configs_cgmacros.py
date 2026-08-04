@@ -134,15 +134,17 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로 (원본 HUPA 파이프라인의 산출물과 겹치지 않도록 파일명 분리)
 # =========================
-# Shanghai(configs_shanghai.py)와 동일하게, MA 적용 여부에 따라 파일명이 자동으로
-# 갈라지도록 해서 두 버전(MA 적용/미적용) 결과가 서로 덮어쓰지 않고 나란히 남는다.
+# Shanghai(configs_shanghai.py)와 동일하게, MA 적용 여부 + horizon(30/60분)에 따라
+# 파일명이 자동으로 갈라지도록 해서 여러 버전 결과가 서로 덮어쓰지 않고 나란히 남는다.
+# (horizon도 실험 조건에 "30분/60분 둘 다"라고 명시돼 있었는데 8/4까지 30분만 돌렸음 -> 8/4 뒤늦게 반영)
 _MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
-MODEL_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}_ecp_graph_plot.png"
+_H_SUFFIX = f"_h{HORIZON_MINUTES}"
+MODEL_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"
 
 # data_revision(절단 복사본) 학습 결과물 경로 -- 원본(raw) 파이프라인 결과와
 # 섞이지 않도록 파일명을 다르게 둔다. train_cgmacros_revision.py/evaluate_cgmacros_revision.py 전용.
-MODEL_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}_ecp_graph_plot.png"
+MODEL_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
+LOSS_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
+ECP_GRAPH_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"
