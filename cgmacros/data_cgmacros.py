@@ -319,20 +319,63 @@ def decimate_segment(data_array, resample_factor):
     return data_array[::resample_factor]
 
 
+def apply_causal_moving_average(data_array, window):
+    """
+    각 피처 컬럼에 대해 "과거 방향(causal)" 이동평균을 적용한다.
+
+    왜 causal(과거방향)인가:
+        처음 MA 효과를 확인할 때 썼던 `rolling(center=True)`는 각 시점의 평균에
+        미래 시점 값까지 섞여 들어간다. 학습 시점에는 미래 값을 알 수 없으므로
+        이건 정보 누출(data leakage)이다. `rolling(window, center=False)`는
+        현재 시점과 그 이전 window-1개 값만 사용해서 평균을 내므로 실사용(추론) 시점과
+        동일한 조건이 된다.
+
+    왜 구간 시작부는 min_periods=1로 처리하는가:
+        구간 맨 앞부분은 아직 window개만큼 과거 데이터가 안 쌓여있다. min_periods=1을
+        주면 그 시점까지 있는 값만으로 평균을 내고(예: 앞에서 3번째 시점이면 3개 평균),
+        NaN으로 날려서 데이터를 통째로 버리는 것보다 낫다.
+
+    ⚠️ Y(타깃)에는 이 함수를 적용하면 안 된다: 타깃까지 평활하면 모델이 "평활된 값"을
+    맞히는 셈이 되어 문제가 실제보다 쉬워지고(RMSE 인위적 개선), 저/고혈당처럼 급격한
+    변화가 사라져 임상 지표가 무의미해진다 (8/2 실측 검증 결과: MA200을 원신호에
+    그대로 적용하면 다수 환자에서 저혈당 이벤트가 완전히 사라짐). 그래서 이 함수는
+    항상 입력(X) 쪽에만 호출하도록 설계했다 (prepare_dataset_cgmacros 참고).
+
+    Args:
+        data_array: 1분 간격 연속 구간(np.ndarray), 컬럼 순서는 feature_names와 동일
+        window: 이동평균 윈도우 크기 (행 개수 = 분 단위, 1분 그리드 기준)
+
+    Returns:
+        np.ndarray: 같은 shape의 평활된 배열
+    """
+    df = pd.DataFrame(data_array)
+    smoothed = df.rolling(window=window, min_periods=1, center=False).mean()
+    return smoothed.to_numpy()
+
+
 def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_map,
                               L, H, patient_limit=None, max_gap_for_interp_min=15,
-                              resample_factor=1):
+                              resample_factor=1, ma_window=None, apply_ma_to_y=False):
     """
-    전체 CGMacros 환자를 로드 -> 결측 기준으로 구간 분리 -> (필요시 5분 등으로 다운샘플링) ->
-    각 구간 안에서만 슬라이딩 윈도우 생성 -> train/val/test로 나눠 전체 환자에 대해 concat한다.
+    전체 CGMacros 환자를 로드 -> 결측 기준으로 구간 분리 -> (필요시 이동평균 스무딩) ->
+    (필요시 5분 등으로 다운샘플링) -> 각 구간 안에서만 슬라이딩 윈도우 생성 ->
+    train/val/test로 나눠 전체 환자에 대해 concat한다.
 
     data.py의 prepare_dataset()과 구조는 동일하되(환자 루프 -> 분할 -> 윈도우 -> concat),
     "환자 1명 = CSV 1개 = 항상 연속" 가정이 깨지므로 "환자 1명 = 여러 개의 연속 구간"으로
     한 단계 더 들어간 이중 루프 구조다.
 
-    다운샘플링(resample_factor)은 결측 절단/보간이 이미 끝난 1분 그리드 구간에 대해
-    적용한다 -> segment_by_gaps의 결측 판정 로직(분 단위 임계값)이 항상 1분 그리드
-    기준으로 정확하게 동작하도록, 순서를 "절단 먼저 -> 다운샘플링 나중"으로 고정했다.
+    처리 순서가 "결측 절단(1분 그리드 기준) -> 이동평균(1분 그리드 기준) -> 다운샘플링"으로
+    고정된 이유:
+      - segment_by_gaps의 분 단위 임계값 판정이 항상 1분 그리드에서 정확히 동작해야 함
+      - MA 윈도우(예: 200분)도 실제 "분" 단위 의미를 가지려면 다운샘플링 전, 1분 그리드에서
+        계산해야 함 (5분 그리드에서 200개 행을 평균내면 1000분이 되어 의도한 200분이 아님)
+
+    이동평균은 X(입력)와 Y(타깃)를 별도 배열로 각각 만들어서 처리한다: ma_window가 주어지면
+    raw_segment를 스무딩한 smoothed_segment를 따로 계산해두고, apply_ma_to_y=False(기본값,
+    권장)이면 X는 smoothed_segment에서, Y는 raw_segment에서 각각 추출한다. 이렇게 하면
+    make_windows()가 요구하는 "X, Y는 같은 시간축을 공유하는 독립된 배열"이라는 조건을
+    그대로 만족하면서, 타깃만 평활에서 제외할 수 있다.
     """
     splits = {"train": ([], []), "val": ([], []), "test": ([], []), "train_val": ([], [])}
 
@@ -346,18 +389,29 @@ def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_m
             continue
 
         for raw_segment in segments:
-            data_array = decimate_segment(raw_segment, resample_factor)
-            if len(data_array) < L + H:
+            smoothed_segment = (
+                apply_causal_moving_average(raw_segment, ma_window)
+                if ma_window is not None else raw_segment
+            )
+
+            raw_decimated = decimate_segment(raw_segment, resample_factor)
+            smoothed_decimated = decimate_segment(smoothed_segment, resample_factor)
+            if len(raw_decimated) < L + H:
                 # 이 구간은 입력창(L)+예측시점(H)조차 못 채우는 너무 짧은 구간 -> 스킵
                 continue
 
-            train_data, val_data, test_data, train_val_data = split_data(data_array)
+            raw_train, raw_val, raw_test, raw_train_val = split_data(raw_decimated)
+            sm_train, sm_val, sm_test, sm_train_val = split_data(smoothed_decimated)
 
-            for key, split_arr in (("train", train_data), ("val", val_data),
-                                    ("test", test_data), ("train_val", train_val_data)):
-                if len(split_arr) < L + H:
+            for key, raw_split, sm_split in (
+                ("train", raw_train, sm_train), ("val", raw_val, sm_val),
+                ("test", raw_test, sm_test), ("train_val", raw_train_val, sm_train_val),
+            ):
+                if len(raw_split) < L + H:
                     continue
-                X, Y = extract_features(split_arr, feature_names, column_map)
+                X, _ = extract_features(sm_split, feature_names, column_map)
+                Y_source = sm_split if apply_ma_to_y else raw_split
+                _, Y = extract_features(Y_source, feature_names, column_map)
                 Xw, Yw = make_windows(X, Y, L, H)
                 if len(Xw) == 0:
                     continue
@@ -377,15 +431,18 @@ def prepare_dataset_cgmacros(data_dir, feature_names, raw_column_names, column_m
 
 def compute_means_variances_cgmacros(data_dir, feature_names, raw_column_names, column_map,
                                       L, H, patient_limit=None, max_gap_for_interp_min=15,
-                                      resample_factor=1):
+                                      resample_factor=1, ma_window=None):
     """
     정규화(z-score)에 쓸 평균/표준편차를 train 구간에서만 계산한다.
 
     data.py의 compute_means_variances()와 동일한 역할이지만, prepare_dataset_cgmacros()와
-    마찬가지로 "구간 분리 -> (필요시) 다운샘플링"을 거친 뒤의 train 부분만 모아서 통계를 낸다.
-    val/test 정보가 통계에 섞이면 안 되므로(데이터 누출 방지) train만 사용하는 원칙은
-    원본 파이프라인과 동일하게 유지했다. resample_factor는 prepare_dataset_cgmacros()에
-    준 값과 반드시 같아야 한다(다르면 정규화 통계와 실제 학습 데이터의 분포가 어긋남).
+    마찬가지로 "구간 분리 -> (필요시 이동평균) -> (필요시) 다운샘플링"을 거친 뒤의 train
+    부분만 모아서 통계를 낸다. val/test 정보가 통계에 섞이면 안 되므로(데이터 누출 방지)
+    train만 사용하는 원칙은 원본 파이프라인과 동일하게 유지했다. resample_factor/ma_window는
+    prepare_dataset_cgmacros()에 준 값과 반드시 같아야 한다(다르면 정규화 통계와 실제
+    학습 데이터의 분포가 어긋남). 여기서는 항상 "모델이 실제로 보는 입력(X)" 기준으로
+    통계를 내야 하므로, ma_window가 있으면 스무딩된 값으로 통계를 낸다
+    (prepare_dataset_cgmacros에서 X는 apply_ma_to_y와 무관하게 항상 스무딩된 쪽을 쓰기 때문).
     """
     patients = discover_patients(data_dir, patient_limit)
     train_X_list = []
@@ -394,7 +451,11 @@ def compute_means_variances_cgmacros(data_dir, feature_names, raw_column_names, 
         feature_df = load_single_patient_cgmacros(csv_path, feature_names, raw_column_names)
         segments = segment_by_gaps(feature_df, max_gap_for_interp_min)
         for raw_segment in segments:
-            data_array = decimate_segment(raw_segment, resample_factor)
+            smoothed_segment = (
+                apply_causal_moving_average(raw_segment, ma_window)
+                if ma_window is not None else raw_segment
+            )
+            data_array = decimate_segment(smoothed_segment, resample_factor)
             if len(data_array) < L + H:
                 continue
             train_data, _, _, _ = split_data(data_array)
@@ -471,12 +532,14 @@ def segment_trimmed_by_timestamp(feature_df_with_ts, normal_interval_min=1):
 
 
 def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names, column_map,
-                                       L, H, patient_limit=None, resample_factor=1):
+                                       L, H, patient_limit=None, resample_factor=1,
+                                       ma_window=None, apply_ma_to_y=False):
     """
     data_revision(절단 복사본)으로부터 train/val/test 윈도우를 만든다.
     prepare_dataset_cgmacros()와 구조는 동일하고, "결측 탐지 방식"만 다르다
     (원본: NaN 패턴 / 절단본: Timestamp 간격) - 위 모듈 설명 참고.
-    resample_factor는 decimate_segment() 참고 (예: 5 -> 5분 간격으로 다운샘플링).
+    resample_factor는 decimate_segment() 참고, ma_window/apply_ma_to_y는
+    apply_causal_moving_average() 및 prepare_dataset_cgmacros()의 X/Y 분리 로직과 동일.
     """
     splits = {"train": ([], []), "val": ([], []), "test": ([], []), "train_val": ([], [])}
 
@@ -490,17 +553,28 @@ def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names,
             continue
 
         for raw_segment in segments:
-            data_array = decimate_segment(raw_segment, resample_factor)
-            if len(data_array) < L + H:
+            smoothed_segment = (
+                apply_causal_moving_average(raw_segment, ma_window)
+                if ma_window is not None else raw_segment
+            )
+
+            raw_decimated = decimate_segment(raw_segment, resample_factor)
+            smoothed_decimated = decimate_segment(smoothed_segment, resample_factor)
+            if len(raw_decimated) < L + H:
                 continue
 
-            train_data, val_data, test_data, train_val_data = split_data(data_array)
+            raw_train, raw_val, raw_test, raw_train_val = split_data(raw_decimated)
+            sm_train, sm_val, sm_test, sm_train_val = split_data(smoothed_decimated)
 
-            for key, split_arr in (("train", train_data), ("val", val_data),
-                                    ("test", test_data), ("train_val", train_val_data)):
-                if len(split_arr) < L + H:
+            for key, raw_split, sm_split in (
+                ("train", raw_train, sm_train), ("val", raw_val, sm_val),
+                ("test", raw_test, sm_test), ("train_val", raw_train_val, sm_train_val),
+            ):
+                if len(raw_split) < L + H:
                     continue
-                X, Y = extract_features(split_arr, feature_names, column_map)
+                X, _ = extract_features(sm_split, feature_names, column_map)
+                Y_source = sm_split if apply_ma_to_y else raw_split
+                _, Y = extract_features(Y_source, feature_names, column_map)
                 Xw, Yw = make_windows(X, Y, L, H)
                 if len(Xw) == 0:
                     continue
@@ -519,9 +593,10 @@ def prepare_dataset_cgmacros_revision(data_dir, feature_names, raw_column_names,
 
 
 def compute_means_variances_cgmacros_revision(data_dir, feature_names, raw_column_names, column_map,
-                                               L, H, patient_limit=None, resample_factor=1):
+                                               L, H, patient_limit=None, resample_factor=1,
+                                               ma_window=None):
     """정규화 통계를 절단 복사본의 train 구간에서만 계산한다 (원본용 함수와 동일한 원칙).
-    resample_factor는 prepare_dataset_cgmacros_revision()에 준 값과 반드시 같아야 한다."""
+    resample_factor/ma_window는 prepare_dataset_cgmacros_revision()에 준 값과 반드시 같아야 한다."""
     patients = discover_patients(data_dir, patient_limit)
     train_X_list = []
 
@@ -529,7 +604,11 @@ def compute_means_variances_cgmacros_revision(data_dir, feature_names, raw_colum
         feature_df = load_single_patient_revision(csv_path, feature_names, raw_column_names)
         segments = segment_trimmed_by_timestamp(feature_df)
         for raw_segment in segments:
-            data_array = decimate_segment(raw_segment, resample_factor)
+            smoothed_segment = (
+                apply_causal_moving_average(raw_segment, ma_window)
+                if ma_window is not None else raw_segment
+            )
+            data_array = decimate_segment(smoothed_segment, resample_factor)
             if len(data_array) < L + H:
                 continue
             train_data, _, _, _ = split_data(data_array)

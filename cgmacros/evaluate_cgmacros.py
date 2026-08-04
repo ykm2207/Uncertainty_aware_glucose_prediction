@@ -27,7 +27,8 @@ from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DT
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, RESAMPLE_FACTOR, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, RESAMPLE_FACTOR,
+    MA_WINDOW, APPLY_MA_TO_Y, PATIENT_LIMIT,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
     MODEL_SAVE_PATH, ECP_GRAPH_SAVE_PATH,
 )
@@ -158,13 +159,13 @@ def main():
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
-        resample_factor=RESAMPLE_FACTOR,
+        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros(
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
-        resample_factor=RESAMPLE_FACTOR,
+        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW,
     )
 
     data_norm = {}

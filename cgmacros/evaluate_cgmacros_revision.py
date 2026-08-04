@@ -22,7 +22,7 @@ from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DT
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, RESAMPLE_FACTOR, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, RESAMPLE_FACTOR, MA_WINDOW, APPLY_MA_TO_Y, PATIENT_LIMIT,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
     MODEL_SAVE_PATH_REVISION, ECP_GRAPH_SAVE_PATH_REVISION,
 )
@@ -147,12 +147,12 @@ def main():
     data_splits = prepare_dataset_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR,
+        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR,
+        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW,
     )
 
     data_norm = {}
