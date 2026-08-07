@@ -26,11 +26,11 @@ from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, g
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MAX_GAP_FOR_INTERP_MIN, RESAMPLE_FACTOR,
-    MA_WINDOW, APPLY_MA_TO_Y, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, HORIZON_MINUTES, MAX_GAP_FOR_INTERP_MIN, RESAMPLE_FACTOR,
+    MA_WINDOW_CANDIDATES_MINUTES, APPLY_MA_TO_Y, PATIENT_LIMIT,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH, LOSS_SAVE_PATH,
+    model_save_path, loss_save_path,
 )
 
 
@@ -132,20 +132,23 @@ def make_loader(X, Y, batch_size, shuffle=False):
     return DataLoader(BGDataset(X, Y), batch_size=batch_size, shuffle=shuffle)
 
 
-def main():
+def run_one_ma_window(ma_window_minutes):
+    """MA_WINDOW_CANDIDATES_MINUTES 중 하나로 데이터 준비부터 학습까지 돌린다.
+    train_cgmacros_revision.py와 동일한 이유로 스크립트 한 번의 실행 안에서 MA 후보를 순회한다."""
+    print(f"\n\n########## CGMacros(raw) 학습: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분 ##########")
     print("=== CGMacros 데이터 로딩 ===")
     data_splits = prepare_dataset_cgmacros(
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes, apply_ma_to_y=APPLY_MA_TO_Y,
     )
 
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros(
         DATA_DIR, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         patient_limit=PATIENT_LIMIT, max_gap_for_interp_min=MAX_GAP_FOR_INTERP_MIN,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes,
     )
 
     # train 통계(mu_gen/sigma_gen)만으로 모든 split을 정규화 -> val/test 정보가
@@ -156,11 +159,9 @@ def main():
         Y_n = normalize_features(Y, np.array([mu_g]), np.array([sigma_g]))
         data_norm[key] = (X_n, Y_n)
 
-    train_input_n, train_output_n = data_norm["train"]
     val_input_n, val_output_n = data_norm["val"]
     train_val_input_n, train_val_output_n = data_norm["train_val"]
 
-    train_loader = make_loader(train_input_n, train_output_n, BATCH_SIZE, shuffle=True)
     val_loader = make_loader(val_input_n, val_output_n, BATCH_SIZE)
     train_val_loader = make_loader(train_val_input_n, train_val_output_n, BATCH_SIZE, shuffle=True)
 
@@ -176,6 +177,7 @@ def main():
         max_len=MAX_LEN,
     )
 
+    save_path = model_save_path(ma_window_minutes)
     print("=== 학습 시작 ===")
     # 원본 train.py와 동일하게 train_val(=train+val 합본)로 학습하고 val로 모니터링한다.
     # (원 논문 저자 코드의 관례를 그대로 따름. val이 학습 데이터에도 포함되어 있어
@@ -190,10 +192,15 @@ def main():
         lambda_reg=LAMBDA_REG,
         reg_term=REG_TERM,
         scheduler_lambda=lambda e: 1.0 if e < NUM_EPOCHS * 0.75 else 0.1,
-        loss_save_path=LOSS_SAVE_PATH,
-        model_save_path=MODEL_SAVE_PATH,
+        loss_save_path=loss_save_path(ma_window_minutes),
+        model_save_path=save_path,
     )
-    print(f"모델 저장 완료: {MODEL_SAVE_PATH}")
+    print(f"모델 저장 완료: {save_path}")
+
+
+def main():
+    for ma_window_minutes in MA_WINDOW_CANDIDATES_MINUTES:
+        run_one_ma_window(ma_window_minutes)
 
 
 if __name__ == "__main__":

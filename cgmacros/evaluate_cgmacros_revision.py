@@ -22,9 +22,10 @@ from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DT
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, RESAMPLE_FACTOR, MA_WINDOW, APPLY_MA_TO_Y, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, HORIZON_MINUTES, RESAMPLE_FACTOR,
+    MA_WINDOW_CANDIDATES_MINUTES, APPLY_MA_TO_Y, PATIENT_LIMIT,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH_REVISION, ECP_GRAPH_SAVE_PATH_REVISION,
+    model_save_path_revision, ecp_graph_save_path_revision,
 )
 
 
@@ -142,17 +143,20 @@ def make_loader(X, Y, batch_size, shuffle=False):
     return DataLoader(BGDataset(X, Y), batch_size=batch_size, shuffle=shuffle)
 
 
-def main():
+def run_one_ma_window(ma_window_minutes):
+    """train_cgmacros_revision.py와 짝을 맞춰, MA 후보 하나(30/60/180분)에 해당하는
+    저장된 모델을 불러와 평가한다. main()에서 후보 목록만큼 반복 호출된다."""
+    print(f"\n\n########## CGMacros 절단본 평가: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분 ##########")
     print("=== CGMacros 절단 복사본(data_revision) 데이터 로딩 ===")
     data_splits = prepare_dataset_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes,
     )
 
     data_norm = {}
@@ -169,19 +173,26 @@ def main():
         input_dim=len(FEATURES), d_model=D_MODEL, n_heads=N_HEADS,
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     ).to(device)
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH_REVISION, map_location=device))
+    model.load_state_dict(torch.load(model_save_path_revision(ma_window_minutes), map_location=device))
 
     print("=== 평가 시작 (절단본) ===")
-    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH_REVISION)
+    metrics = evaluate_model_evidential(
+        model, test_loader, sigma_g, mu_g, ecp_graph_save_path_revision(ma_window_minutes)
+    )
 
-    print("\n[CGMacros 절단본 평가 결과]")
+    print(f"\n[CGMacros 절단본 평가 결과: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분]")
     for k, v in metrics.items():
         print(f"{k}: {v:.3f}" if not np.isnan(v) else f"{k}: 정의 불가(해당 샘플 없음)")
 
+
+def main():
+    for ma_window_minutes in MA_WINDOW_CANDIDATES_MINUTES:
+        run_one_ma_window(ma_window_minutes)
+
     print(
-        "\n[참고] 이 결과는 HR/Calories 긴 결측 구간을 잘라낸(평균 89% 데이터 유지) "
-        "복사본으로 학습·평가한 것입니다. evaluate_cgmacros.py(원본, 메모리에서 즉석 절단)와\n"
-        "지표 정의는 동일하므로 두 결과를 직접 비교해 '절단 방식 차이가 성능에 영향을 주는지' 확인할 수 있습니다."
+        "\n[참고] 위 결과들은 HR/Calories 긴 결측 구간을 잘라낸(평균 89% 데이터 유지) "
+        "복사본으로 학습·평가한 것이며, 이동평균 미적용(0) 베이스라인은 기존에 완료된\n"
+        "cgmacros_revision_h30/h60 결과를 그대로 재사용합니다(이번 스윕 대상 아님)."
     )
 
 

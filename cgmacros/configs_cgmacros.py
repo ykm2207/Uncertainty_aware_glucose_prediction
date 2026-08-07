@@ -96,14 +96,15 @@ MAX_GAP_FOR_INTERP_MIN = 15
 #
 # 8/4 결정: 팀 지정값 200으로 먼저 300epoch 학습해봤는데(결과: cgmacros_revision_ma_*),
 # MA 미적용 대비 RMSE/MAE/MARD/Zone 정확도/민감도가 전부 뚜렷하게 나빠짐 (Shanghai도 동일 경향).
-# "성능이 좋은 쪽을 고르는" 게 목적이 아니라 지정 조건을 그대로 재현해서 비교 보고하는 게
-# 목적이므로, MA 미적용 버전도 동일하게 300epoch 정식으로 돌려서 두 결과를 나란히 남긴다.
-# -> 그래서 기본값을 False로 바꿔 "MA 미적용 300epoch" 비교군을 만든다. 단위는 "분"이며
-# NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 적용된다(다운샘플링 전에 적용하므로
-# 5분 그리드 행 개수가 아니라 실제 분 단위로 정확히 200분).
-APPLY_MOVING_AVERAGE = True
-MA_WINDOW_MINUTES = 200
-MA_WINDOW = MA_WINDOW_MINUTES if APPLY_MOVING_AVERAGE else None
+# MA 미적용 버전은 이미 300epoch 정식으로 완료돼 있으므로(cgmacros_revision_h30/h60) 그대로 재사용한다.
+#
+# 8/7 결정: 200분 고정값이 임의로 너무 길었다는 판단 하에 이동평균 실험을 다시 설계.
+# 30/60/180분 세 후보로 바꿔서, 후보마다 개별로 학습을 다시 돌리는 대신 스크립트 한 번
+# 실행(train_cgmacros_revision.py)에서 이 리스트를 순회하며 후보마다 300epoch씩 정식
+# 학습하도록 바꿨다(아래 파일 하단 "결과 저장 경로" 섹션의 경로 생성 함수 참고).
+# 단위는 "분"이며 NATIVE_SAMPLE_INTERVAL_MIN(1분) 그리드 기준으로 적용된다
+# (다운샘플링 전에 적용하므로 5분 그리드 행 개수가 아니라 실제 분 단위로 정확히 적용됨).
+MA_WINDOW_CANDIDATES_MINUTES = [30, 60, 180]
 APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (위 설명 참고, 임의로 True로 바꾸지 말 것)
 
 # =========================
@@ -134,17 +135,39 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로 (원본 HUPA 파이프라인의 산출물과 겹치지 않도록 파일명 분리)
 # =========================
-# Shanghai(configs_shanghai.py)와 동일하게, MA 적용 여부 + horizon(30/60분)에 따라
-# 파일명이 자동으로 갈라지도록 해서 여러 버전 결과가 서로 덮어쓰지 않고 나란히 남는다.
-# (horizon도 실험 조건에 "30분/60분 둘 다"라고 명시돼 있었는데 8/4까지 30분만 돌렸음 -> 8/4 뒤늦게 반영)
-_MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
+# 8/7부터는 MA 적용 여부가 True/False 하나가 아니라 "몇 분짜리 MA인지"까지 파일명에
+# 들어가야 하므로(30/60/180분을 한 스크립트 실행 안에서 순회), 고정 상수 대신
+# ma_window_minutes를 인자로 받는 함수로 바꿨다. None/0을 넘기면 MA 미적용 경로가 나온다
+# (기존 cgmacros_revision_h30_tem_model.pth 같은 MA 미적용 완료본과 그대로 호환).
 _H_SUFFIX = f"_h{HORIZON_MINUTES}"
-MODEL_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = f"./cgmacros{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"
+
+
+def _ma_suffix(ma_window_minutes):
+    """MA 윈도우 값(분)을 파일명 접미사로 변환. None/0이면 '이동평균 미적용'을 뜻하는 빈 문자열."""
+    return f"_ma{ma_window_minutes}" if ma_window_minutes else ""
+
+
+def model_save_path(ma_window_minutes=None):
+    return f"./cgmacros{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_tem_model.pth"
+
+
+def loss_save_path(ma_window_minutes=None):
+    return f"./cgmacros{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_training_loss_plot.png"
+
+
+def ecp_graph_save_path(ma_window_minutes=None):
+    return f"./cgmacros{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_ecp_graph_plot.png"
+
 
 # data_revision(절단 복사본) 학습 결과물 경로 -- 원본(raw) 파이프라인 결과와
 # 섞이지 않도록 파일명을 다르게 둔다. train_cgmacros_revision.py/evaluate_cgmacros_revision.py 전용.
-MODEL_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH_REVISION = f"./cgmacros_revision{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"
+def model_save_path_revision(ma_window_minutes=None):
+    return f"./cgmacros_revision{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_tem_model.pth"
+
+
+def loss_save_path_revision(ma_window_minutes=None):
+    return f"./cgmacros_revision{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_training_loss_plot.png"
+
+
+def ecp_graph_save_path_revision(ma_window_minutes=None):
+    return f"./cgmacros_revision{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_ecp_graph_plot.png"

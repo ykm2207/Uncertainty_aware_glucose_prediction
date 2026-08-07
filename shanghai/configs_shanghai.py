@@ -51,17 +51,23 @@ MIN_SESSION_ROWS = INPUT_TIMESTEPS + HORIZON_LENGTH + 10
 # 이동평균을 적용하고, 타깃(Y)은 항상 원본을 유지한다 (APPLY_MA_TO_Y=False 고정).
 #
 # 8/4 이전까지는 Shanghai를 MA 미적용 상태로 300epoch 학습했었다(그 결과는
-# ./shanghai_tem_model.pth로 이미 저장/커밋되어 있음). 이번에 MA를 추가하면서,
-# 그 결과를 덮어쓰지 않고 나란히 비교할 수 있도록 저장 경로를 MA 적용 여부에 따라
-# 자동으로 다르게 잡는다 (아래 "결과 저장 경로" 섹션 참고).
+# ./shanghai_h30/h60_tem_model.pth로 이미 저장/커밋되어 있음 -> 이번 스윕에서도 그대로 재사용).
 #
-# 단위: Shanghai는 이미 15분 그리드라 별도 리샘플링이 없으므로, MA_WINDOW는
-# "15분 그리드 기준 행 개수"다. 67행 = 67 x 15분 = 1005분(~16.75시간) 스무딩 윈도우.
-# (8/2 실측 검증: 이 값을 원신호에 그대로 적용하면 저/고혈당 이벤트가 거의 다 사라짐 ->
-#  그래서 X에만 적용하고 Y는 원본 유지하는 지금 방식이 필수적임)
-APPLY_MOVING_AVERAGE = False
-MA_WINDOW = 67 if APPLY_MOVING_AVERAGE else None
+# 8/7 결정: 기존 고정값(67행=1005분)이 임의로 너무 길었다는 판단 하에 재설계.
+# CGMacros와 동일하게 "분" 단위 후보 30/60/180으로 통일하고, apply_causal_moving_average()가
+# 받는 window는 "행 개수"이므로 여기서 분 -> 행으로 환산한다(SAMPLE_INTERVAL_MIN=15이므로
+# 30/60/180분은 각각 2/4/12행). 후보마다 개별 실행 대신, train_shanghai.py 한 번의 실행
+# 안에서 이 리스트를 순회하며 각각 300epoch씩 정식 학습한다.
+MA_WINDOW_CANDIDATES_MINUTES = [30, 60, 180]
 APPLY_MA_TO_Y = False  # 타깃은 항상 원본 유지 (임의로 True로 바꾸지 말 것)
+
+
+def ma_minutes_to_rows(ma_window_minutes):
+    """분 단위 MA 후보를 apply_causal_moving_average()가 받는 '행 개수'로 환산.
+    Shanghai는 15분 그리드라 CGMacros(1분 그리드)와 달리 분==행이 아니므로 변환이 필요하다."""
+    if not ma_window_minutes:
+        return None
+    return ma_window_minutes // SAMPLE_INTERVAL_MIN
 
 # =========================
 # 학습 설정 (실험 조건 지정값)
@@ -89,11 +95,25 @@ MAX_LEN = 100
 # =========================
 # 결과 저장 경로
 # =========================
-# MA 적용 여부 + horizon(30/60분)에 따라 자동으로 파일명이 갈라진다 -> 여러 버전이
-# 서로 덮어쓰지 않고 나란히 비교 가능 (horizon도 실험 조건에 "30/60분 둘 다"였는데
-# 8/4까지 30분만 돌렸음 -> 8/4 뒤늦게 반영).
-_MA_SUFFIX = "_ma" if APPLY_MOVING_AVERAGE else ""
+# 8/7부터는 MA 적용 여부가 True/False 하나가 아니라 "몇 분짜리 MA인지"까지 파일명에
+# 들어가야 하므로(30/60/180분을 한 스크립트 실행 안에서 순회), CGMacros와 동일하게
+# 고정 상수 대신 ma_window_minutes를 인자로 받는 함수로 바꿨다. None/0을 넘기면 MA 미적용
+# 경로가 나온다 (기존 shanghai_h30/h60_tem_model.pth와 그대로 호환).
 _H_SUFFIX = f"_h{HORIZON_MINUTES}"
-MODEL_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_tem_model.pth"
-LOSS_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_training_loss_plot.png"
-ECP_GRAPH_SAVE_PATH = f"./shanghai{_MA_SUFFIX}{_H_SUFFIX}_ecp_graph_plot.png"
+
+
+def _ma_suffix(ma_window_minutes):
+    """MA 윈도우 값(분)을 파일명 접미사로 변환. None/0이면 '이동평균 미적용'을 뜻하는 빈 문자열."""
+    return f"_ma{ma_window_minutes}" if ma_window_minutes else ""
+
+
+def model_save_path(ma_window_minutes=None):
+    return f"./shanghai{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_tem_model.pth"
+
+
+def loss_save_path(ma_window_minutes=None):
+    return f"./shanghai{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_training_loss_plot.png"
+
+
+def ecp_graph_save_path(ma_window_minutes=None):
+    return f"./shanghai{_ma_suffix(ma_window_minutes)}{_H_SUFFIX}_ecp_graph_plot.png"

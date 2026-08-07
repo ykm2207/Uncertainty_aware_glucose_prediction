@@ -27,10 +27,10 @@ from utils import (rmse, mae, get_device, sensitivity_metric, CI_calculation, DT
 from model import e_Transformers
 from configs_shanghai import (
     DATA_DIR, FEATURES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MIN_SESSION_ROWS, SESSION_LIMIT,
-    MA_WINDOW, APPLY_MA_TO_Y,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, HORIZON_MINUTES, MIN_SESSION_ROWS, SESSION_LIMIT,
+    MA_WINDOW_CANDIDATES_MINUTES, ma_minutes_to_rows, APPLY_MA_TO_Y,
     BATCH_SIZE, DEVICE, D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH, ECP_GRAPH_SAVE_PATH,
+    model_save_path, ecp_graph_save_path,
 )
 
 
@@ -148,16 +148,20 @@ def make_loader(X, Y, batch_size, shuffle=False):
     return DataLoader(BGDataset(X, Y), batch_size=batch_size, shuffle=shuffle)
 
 
-def main():
+def run_one_ma_window(ma_window_minutes):
+    """train_shanghai.py와 짝을 맞춰, MA 후보 하나(30/60/180분)에 해당하는 저장된 모델을
+    불러와 평가한다. main()에서 후보 목록만큼 반복 호출된다."""
+    ma_window_rows = ma_minutes_to_rows(ma_window_minutes)
+    print(f"\n\n########## Shanghai 평가: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분({ma_window_rows}행) ##########")
     print("=== Shanghai_T2DM 데이터 로딩 ===")
     data_splits = prepare_dataset_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
-        ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
+        ma_window=ma_window_rows, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
-        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS, ma_window=MA_WINDOW,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS, ma_window=ma_window_rows,
     )
 
     data_norm = {}
@@ -174,14 +178,19 @@ def main():
         input_dim=len(FEATURES), d_model=D_MODEL, n_heads=N_HEADS,
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     ).to(device)
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
+    model.load_state_dict(torch.load(model_save_path(ma_window_minutes), map_location=device))
 
     print("=== 평가 시작 ===")
-    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ECP_GRAPH_SAVE_PATH)
+    metrics = evaluate_model_evidential(model, test_loader, sigma_g, mu_g, ecp_graph_save_path(ma_window_minutes))
 
-    print("\n[Shanghai_T2DM 평가 결과]")
+    print(f"\n[Shanghai_T2DM 평가 결과: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분]")
     for k, v in metrics.items():
         print(f"{k}: {v:.3f}" if not np.isnan(v) else f"{k}: 정의 불가(해당 샘플 없음)")
+
+
+def main():
+    for ma_window_minutes in MA_WINDOW_CANDIDATES_MINUTES:
+        run_one_ma_window(ma_window_minutes)
 
     print(
         "\n[지표 변경에 따른 차이 안내]\n"

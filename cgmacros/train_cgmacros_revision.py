@@ -7,7 +7,7 @@
 #   2) 그래서 prepare_dataset_cgmacros/compute_means_variances_cgmacros가 아니라
 #      data_cgmacros.py의 *_revision 버전을 쓴다 (Timestamp 간격으로 절단 지점을
 #      다시 찾는 방식 - data_cgmacros.py 모듈 하단 설명 참고).
-# 모델 저장 경로도 원본 파이프라인 결과와 섞이지 않도록 별도 파일명(MODEL_SAVE_PATH_REVISION)을 쓴다.
+# 모델 저장 경로도 원본 파이프라인 결과와 섞이지 않도록 별도 파일명(model_save_path_revision())을 쓴다.
 import os
 import sys
 import torch
@@ -25,10 +25,11 @@ from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, g
 from model import e_Transformers
 from configs_cgmacros import (
     DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, RESAMPLE_FACTOR, MA_WINDOW, APPLY_MA_TO_Y, PATIENT_LIMIT,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, HORIZON_MINUTES, RESAMPLE_FACTOR,
+    MA_WINDOW_CANDIDATES_MINUTES, APPLY_MA_TO_Y, PATIENT_LIMIT,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH_REVISION, LOSS_SAVE_PATH_REVISION,
+    model_save_path_revision, loss_save_path_revision,
 )
 
 
@@ -127,17 +128,24 @@ def make_loader(X, Y, batch_size, shuffle=False):
     return DataLoader(BGDataset(X, Y), batch_size=batch_size, shuffle=shuffle)
 
 
-def main():
+def run_one_ma_window(ma_window_minutes):
+    """
+    MA_WINDOW_CANDIDATES_MINUTES 중 하나(30/60/180분)로 데이터 준비부터 학습까지 전부 돌린다.
+    8/7 이전에는 bash 스크립트가 sed로 config의 MA 값 하나를 바꾼 뒤 python을 매번 새로
+    실행하는 방식이었는데, 이제는 "이동평균을 바꿔가며 한 번의 학습 실행 안에서 처리"하라는
+    요청에 맞춰 이 함수를 후보 목록만큼 반복 호출하는 구조로 바꿨다(main() 참고).
+    """
+    print(f"\n\n########## CGMacros 절단본 학습: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분 ##########")
     print("=== CGMacros 절단 복사본(data_revision) 데이터 로딩 ===")
     data_splits = prepare_dataset_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_cgmacros_revision(
         DATA_DIR_REVISION, FEATURES, RAW_COLUMN_NAMES, COLUMN_MAP,
         L=INPUT_TIMESTEPS, H=HORIZON_LENGTH, patient_limit=PATIENT_LIMIT,
-        resample_factor=RESAMPLE_FACTOR, ma_window=MA_WINDOW,
+        resample_factor=RESAMPLE_FACTOR, ma_window=ma_window_minutes,
     )
 
     data_norm = {}
@@ -159,6 +167,7 @@ def main():
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     )
 
+    save_path = model_save_path_revision(ma_window_minutes)
     print("=== 학습 시작 (절단본) ===")
     train_evidential_model(
         model,
@@ -170,10 +179,17 @@ def main():
         lambda_reg=LAMBDA_REG,
         reg_term=REG_TERM,
         scheduler_lambda=lambda e: 1.0 if e < NUM_EPOCHS * 0.75 else 0.1,
-        loss_save_path=LOSS_SAVE_PATH_REVISION,
-        model_save_path=MODEL_SAVE_PATH_REVISION,
+        loss_save_path=loss_save_path_revision(ma_window_minutes),
+        model_save_path=save_path,
     )
-    print(f"모델 저장 완료: {MODEL_SAVE_PATH_REVISION}")
+    print(f"모델 저장 완료: {save_path}")
+
+
+def main():
+    # horizon(30/60분)은 run_ma_sweep.sh가 config를 sed로 바꿔가며 스크립트를 두 번 실행해서
+    # 처리하고, MA 윈도우(30/60/180분)는 이 스크립트 한 번의 실행 안에서 전부 순회한다.
+    for ma_window_minutes in MA_WINDOW_CANDIDATES_MINUTES:
+        run_one_ma_window(ma_window_minutes)
 
 
 if __name__ == "__main__":

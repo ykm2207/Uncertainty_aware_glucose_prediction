@@ -19,11 +19,11 @@ from utils import evidential_data_loss, kl_reg_loss_term, amini_reg_loss_term, g
 from model import e_Transformers
 from configs_shanghai import (
     DATA_DIR, FEATURES, COLUMN_MAP,
-    INPUT_TIMESTEPS, HORIZON_LENGTH, MIN_SESSION_ROWS, SESSION_LIMIT,
-    MA_WINDOW, APPLY_MA_TO_Y,
+    INPUT_TIMESTEPS, HORIZON_LENGTH, HORIZON_MINUTES, MIN_SESSION_ROWS, SESSION_LIMIT,
+    MA_WINDOW_CANDIDATES_MINUTES, ma_minutes_to_rows, APPLY_MA_TO_Y,
     BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, LAMBDA_REG, REG_TERM, DEVICE,
     D_MODEL, N_HEADS, NUM_LAYERS, FF_DIM, MAX_LEN,
-    MODEL_SAVE_PATH, LOSS_SAVE_PATH,
+    model_save_path, loss_save_path,
 )
 
 
@@ -122,16 +122,20 @@ def make_loader(X, Y, batch_size, shuffle=False):
     return DataLoader(BGDataset(X, Y), batch_size=batch_size, shuffle=shuffle)
 
 
-def main():
+def run_one_ma_window(ma_window_minutes):
+    """MA_WINDOW_CANDIDATES_MINUTES 중 하나(30/60/180분)로 데이터 준비부터 학습까지 전부 돌린다.
+    train_cgmacros_revision.py와 동일한 이유로 스크립트 한 번의 실행 안에서 MA 후보를 순회한다."""
+    ma_window_rows = ma_minutes_to_rows(ma_window_minutes)
+    print(f"\n\n########## Shanghai 학습: horizon={HORIZON_MINUTES}분, MA={ma_window_minutes}분({ma_window_rows}행) ##########")
     print("=== Shanghai_T2DM 데이터 로딩 ===")
     data_splits = prepare_dataset_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
         session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS,
-        ma_window=MA_WINDOW, apply_ma_to_y=APPLY_MA_TO_Y,
+        ma_window=ma_window_rows, apply_ma_to_y=APPLY_MA_TO_Y,
     )
     mu_g, sigma_g, mu_gen, sigma_gen = compute_means_variances_shanghai(
         DATA_DIR, FEATURES, COLUMN_MAP, L=INPUT_TIMESTEPS, H=HORIZON_LENGTH,
-        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS, ma_window=MA_WINDOW,
+        session_limit=SESSION_LIMIT, min_session_rows=MIN_SESSION_ROWS, ma_window=ma_window_rows,
     )
 
     data_norm = {}
@@ -153,6 +157,7 @@ def main():
         num_layers=NUM_LAYERS, ff_dim=FF_DIM, output_dim=HORIZON_LENGTH, max_len=MAX_LEN,
     )
 
+    save_path = model_save_path(ma_window_minutes)
     print("=== 학습 시작 ===")
     train_evidential_model(
         model,
@@ -164,10 +169,17 @@ def main():
         lambda_reg=LAMBDA_REG,
         reg_term=REG_TERM,
         scheduler_lambda=lambda e: 1.0 if e < NUM_EPOCHS * 0.75 else 0.1,
-        loss_save_path=LOSS_SAVE_PATH,
-        model_save_path=MODEL_SAVE_PATH,
+        loss_save_path=loss_save_path(ma_window_minutes),
+        model_save_path=save_path,
     )
-    print(f"모델 저장 완료: {MODEL_SAVE_PATH}")
+    print(f"모델 저장 완료: {save_path}")
+
+
+def main():
+    # horizon(30/60분)은 run_ma_sweep.sh가 config를 sed로 바꿔가며 스크립트를 두 번 실행해서
+    # 처리하고, MA 윈도우(30/60/180분)는 이 스크립트 한 번의 실행 안에서 전부 순회한다.
+    for ma_window_minutes in MA_WINDOW_CANDIDATES_MINUTES:
+        run_one_ma_window(ma_window_minutes)
 
 
 if __name__ == "__main__":
