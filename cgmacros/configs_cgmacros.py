@@ -70,7 +70,7 @@ INPUT_TIMESTEPS = 36
 # 예측 시점(horizon)을 "분" 단위로 지정하고, 실제 스텝 수는 샘플링 간격으로
 # 자동 환산한다. 이렇게 하면 데이터셋마다 샘플링 간격이 달라도 "30분 뒤 예측"이라는
 # 의미가 코드 전역에서 일관되게 유지된다 (하드코딩된 스텝 수를 쓰면 헷갈리기 쉬움).
-HORIZON_MINUTES = 30  # AUTO-SET by run_ma_sweep.sh
+HORIZON_MINUTES = 60  # AUTO-SET by run_ma_sweep.sh
 HORIZON_LENGTH = HORIZON_MINUTES // SAMPLE_INTERVAL_MIN
 
 # =========================
